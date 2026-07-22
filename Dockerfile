@@ -3,7 +3,7 @@ ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 ENV NPM_CONFIG_DISTURL=https://npmmirror.com/mirrors/node
 RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apk/repositories \
  && apk add --no-cache python3 make g++ \
- && corepack enable && corepack prepare pnpm@10.15.0 --activate \
+ && npm install --global pnpm@10.15.0 --registry=https://registry.npmmirror.com \
  && pnpm config set registry https://registry.npmmirror.com
 WORKDIR /app
 
@@ -36,7 +36,7 @@ ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 ENV NPM_CONFIG_DISTURL=https://npmmirror.com/mirrors/node
 RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apk/repositories \
  && apk add --no-cache python3 make g++ \
- && corepack enable && corepack prepare pnpm@10.15.0 --activate \
+ && npm install --global pnpm@10.15.0 --registry=https://registry.npmmirror.com \
  && pnpm config set registry https://registry.npmmirror.com
 WORKDIR /app
 
