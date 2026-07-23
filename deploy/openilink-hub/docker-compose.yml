@@ -1,6 +1,6 @@
 services:
   openilink-hub:
-    image: openilink/openilink-hub:latest
+    image: ghcr.io/openilink/openilink-hub:latest
     container_name: openilink-hub
     restart: unless-stopped
     ports:
@@ -16,3 +16,28 @@ services:
       - SECRET=${SECRET}
     volumes:
       - ./data:/var/lib/openilink-hub
+
+  integration-gateway:
+    image: nginx:1.27-alpine
+    container_name: housekeeper-integration-gateway
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-8080}:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: housekeeper-cloudflared
+    restart: unless-stopped
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --protocol
+      - http2
+      - --url
+      - http://integration-gateway:80
+    depends_on:
+      - integration-gateway
