@@ -45,20 +45,30 @@ function getMemberLookup() {
   return new Map(rows.map((row) => [row.id, row]));
 }
 
-function getExpenseTotal(start: string, end: string): number {
+function getTransactionSummary(
+  type: "expense" | "income",
+  start: string,
+  end: string
+): { total: number; count: number } {
   const row = db
-    .select({ total: sql<number>`coalesce(sum(amount), 0)` })
+    .select({
+      total: sql<number>`coalesce(sum(amount), 0)`,
+      count: sql<number>`count(*)`,
+    })
     .from(transactions)
     .where(
       and(
-        eq(transactions.type, "expense"),
+        eq(transactions.type, type),
         gte(transactions.transactionDate, start),
         lte(transactions.transactionDate, end)
       )
     )
     .get();
 
-  return Number(row?.total || 0);
+  return {
+    total: roundMoney(Number(row?.total || 0)),
+    count: Number(row?.count || 0),
+  };
 }
 
 function getCategoryStats(start: string, end: string): CategoryStat[] {
@@ -303,7 +313,8 @@ function buildAnalysisMessage(snapshot: FinancialAnalysisSnapshot): string {
       const topCategories = member.topCategories
         .map((item) => `${item.categoryName} ${item.amount.toFixed(2)} 元`)
         .join("、");
-      return `- ${member.memberName}: 支出 ${member.expense.toFixed(2)} 元，占 ${member.percentage}%，${member.expenseCount} 笔；Top 分类：${topCategories || "暂无"}`;
+      const netCashFlow = roundMoney(member.income - member.expense);
+      return `- ${member.memberName}: 收入 ${member.income.toFixed(2)} 元，支出 ${member.expense.toFixed(2)} 元，净结余 ${netCashFlow.toFixed(2)} 元；支出占家庭总支出 ${member.percentage}%，${member.expenseCount} 笔；Top 支出分类：${topCategories || "暂无"}`;
     })
     .join("\n");
 
@@ -328,8 +339,12 @@ function buildAnalysisMessage(snapshot: FinancialAnalysisSnapshot): string {
   return `${snapshot.month} 家庭财务分析数据
 周期：${snapshot.period}
 
-支出概况：
+收支概况：
+- 本月总收入：${snapshot.totalIncome.toFixed(2)} 元
 - 本月总支出：${snapshot.totalExpense.toFixed(2)} 元
+- 本月净结余：${snapshot.netCashFlow.toFixed(2)} 元
+- 储蓄率：${snapshot.savingsRate === null ? "无法计算（本月无收入记录）" : `${snapshot.savingsRate}%`}
+- 收入笔数：${snapshot.incomeTransactionCount ?? "未统计"} 笔
 - 支出笔数：${snapshot.expenseTransactionCount} 笔
 - 上月支出：${snapshot.previousMonthExpense.toFixed(2)} 元
 - 环比变化：${snapshot.expenseChangeAmount >= 0 ? "+" : ""}${snapshot.expenseChangeAmount.toFixed(2)} 元${
@@ -339,8 +354,8 @@ function buildAnalysisMessage(snapshot: FinancialAnalysisSnapshot): string {
 支出分类：
 ${categoryLines || "- 暂无支出分类数据"}
 
-成员支出：
-${memberLines || "- 暂无成员支出数据"}
+成员收支：
+${memberLines || "- 暂无成员收支数据"}
 
 本月大额支出：
 ${topTransactionLines || "- 暂无大额支出数据"}
@@ -359,20 +374,30 @@ export async function generateFinancialAnalysis(month: string): Promise<Financia
   const previousMonth = `${previous.year}-${String(previous.month).padStart(2, "0")}`;
   const { start: previousStart, end: previousEnd } = getMonthDateRange(`${previousMonth}-01`);
 
-  const totalExpense = roundMoney(getExpenseTotal(start, end));
-  const previousMonthExpense = roundMoney(getExpenseTotal(previousStart, previousEnd));
+  const incomeSummary = getTransactionSummary("income", start, end);
+  const expenseSummary = getTransactionSummary("expense", start, end);
+  const previousExpenseSummary = getTransactionSummary("expense", previousStart, previousEnd);
+  const totalIncome = incomeSummary.total;
+  const totalExpense = expenseSummary.total;
+  const netCashFlow = roundMoney(totalIncome - totalExpense);
+  const savingsRate = totalIncome > 0 ? roundPercent(netCashFlow / totalIncome) : null;
+  const previousMonthExpense = previousExpenseSummary.total;
   const categoryStats = getCategoryStats(start, end);
   const memberStats = getMemberStats(start, end);
   const topTransactions = getTopTransactions(start, end);
   const recurringCandidates = getRecurringCandidates(start, end);
   const assetSummary = getAssetSummary();
-  const expenseTransactionCount = categoryStats.reduce((sum, item) => sum + item.count, 0);
+  const expenseTransactionCount = expenseSummary.count;
   const expenseChangeAmount = roundMoney(totalExpense - previousMonthExpense);
 
   const snapshot: FinancialAnalysisSnapshot = {
     month: normalizedMonth,
     period: `${start} ~ ${end}`,
+    totalIncome,
     totalExpense,
+    netCashFlow,
+    savingsRate,
+    incomeTransactionCount: incomeSummary.count,
     previousMonthExpense,
     expenseChangeAmount,
     expenseChangePercentage:
@@ -397,6 +422,41 @@ export async function generateFinancialAnalysis(month: string): Promise<Financia
 }
 
 // ---- 持久化：保存 / 读取 / 历史列表 ----
+
+function normalizeFinancialAnalysisSnapshot(
+  rawSnapshot: FinancialAnalysisSnapshot
+): FinancialAnalysisSnapshot {
+  const totalIncome =
+    typeof rawSnapshot.totalIncome === "number"
+      ? rawSnapshot.totalIncome
+      : roundMoney(
+          (rawSnapshot.memberStats || []).reduce(
+            (sum, member) => sum + Number(member.income || 0),
+            0
+          )
+        );
+  const netCashFlow =
+    typeof rawSnapshot.netCashFlow === "number"
+      ? rawSnapshot.netCashFlow
+      : roundMoney(totalIncome - Number(rawSnapshot.totalExpense || 0));
+  const savingsRate =
+    typeof rawSnapshot.savingsRate === "number"
+      ? rawSnapshot.savingsRate
+      : totalIncome > 0
+        ? roundPercent(netCashFlow / totalIncome)
+        : null;
+
+  return {
+    ...rawSnapshot,
+    totalIncome,
+    netCashFlow,
+    savingsRate,
+    incomeTransactionCount:
+      typeof rawSnapshot.incomeTransactionCount === "number"
+        ? rawSnapshot.incomeTransactionCount
+        : null,
+  };
+}
 
 // 按月保存分析结果（存在则覆盖，实现「重新生成」）
 export function saveFinancialAnalysis(result: FinancialAnalysisResponse): void {
@@ -447,7 +507,9 @@ export function getSavedFinancialAnalysis(month: string): FinancialAnalysisRespo
     month: row.month,
     generatedAt: row.generatedAt,
     analysis: row.analysis,
-    snapshot: JSON.parse(row.snapshot) as FinancialAnalysisSnapshot,
+    snapshot: normalizeFinancialAnalysisSnapshot(
+      JSON.parse(row.snapshot) as FinancialAnalysisSnapshot
+    ),
   };
 }
 
@@ -459,11 +521,16 @@ export function listFinancialAnalyses(): FinancialAnalysisSummary[] {
     .orderBy(desc(financialAnalyses.month))
     .all()
     .map((row) => {
-      const snapshot = JSON.parse(row.snapshot) as FinancialAnalysisSnapshot;
+      const snapshot = normalizeFinancialAnalysisSnapshot(
+        JSON.parse(row.snapshot) as FinancialAnalysisSnapshot
+      );
       return {
         month: row.month,
         generatedAt: row.generatedAt,
+        totalIncome: snapshot.totalIncome,
         totalExpense: snapshot.totalExpense,
+        netCashFlow: snapshot.netCashFlow,
+        savingsRate: snapshot.savingsRate,
         expenseTransactionCount: snapshot.expenseTransactionCount,
         expenseChangeAmount: snapshot.expenseChangeAmount,
       };

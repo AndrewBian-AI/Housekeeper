@@ -76,8 +76,12 @@ export async function analysisRoutes(app: FastifyInstance) {
         request.log.info(
           {
             month: result.month,
+            incomeTransactionCount: result.snapshot.incomeTransactionCount,
+            totalIncome: result.snapshot.totalIncome,
             expenseTransactionCount: result.snapshot.expenseTransactionCount,
             totalExpense: result.snapshot.totalExpense,
+            netCashFlow: result.snapshot.netCashFlow,
+            savingsRate: result.snapshot.savingsRate,
           },
           "Monthly AI financial analysis generated"
         );

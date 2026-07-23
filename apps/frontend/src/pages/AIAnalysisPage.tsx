@@ -11,6 +11,14 @@ function formatCurrency(value: number): string {
   return `¥${value.toFixed(2)}`;
 }
 
+function formatSignedCurrency(value: number): string {
+  return `${value >= 0 ? "+" : "-"}¥${Math.abs(value).toFixed(2)}`;
+}
+
+function formatSavingsRate(value: number | null): string {
+  return value === null ? "无法计算" : `${value.toFixed(2)}%`;
+}
+
 function getDefaultMonth(): string {
   return getBusinessToday().slice(0, 7);
 }
@@ -137,7 +145,7 @@ export function AIAnalysisPage() {
                 >
                   <span className="font-medium">{item.month}</span>
                   <span className={`ml-2 text-xs ${active ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
-                    {formatCurrency(item.totalExpense)}
+                    收 {formatCurrency(item.totalIncome)} · 支 {formatCurrency(item.totalExpense)}
                   </span>
                 </button>
               );
@@ -169,11 +177,36 @@ export function AIAnalysisPage() {
       {result && (
         <>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <SummaryCard label="本月收入" value={formatCurrency(result.snapshot.totalIncome)} tone="success" />
             <SummaryCard label="本月支出" value={formatCurrency(result.snapshot.totalExpense)} />
+            <SummaryCard
+              label="本月净结余"
+              value={formatSignedCurrency(result.snapshot.netCashFlow)}
+              tone={result.snapshot.netCashFlow >= 0 ? "success" : "danger"}
+            />
+            <SummaryCard
+              label="储蓄率"
+              value={formatSavingsRate(result.snapshot.savingsRate)}
+              tone={
+                result.snapshot.savingsRate === null
+                  ? "default"
+                  : result.snapshot.savingsRate >= 0
+                    ? "success"
+                    : "danger"
+              }
+            />
+            <SummaryCard
+              label="收入笔数"
+              value={
+                result.snapshot.incomeTransactionCount === null
+                  ? "需重新生成"
+                  : `${result.snapshot.incomeTransactionCount} 笔`
+              }
+            />
             <SummaryCard label="支出笔数" value={`${result.snapshot.expenseTransactionCount} 笔`} />
             <SummaryCard
               label="上月对比"
-              value={`${result.snapshot.expenseChangeAmount >= 0 ? "+" : ""}${formatCurrency(result.snapshot.expenseChangeAmount)}`}
+              value={formatSignedCurrency(result.snapshot.expenseChangeAmount)}
               tone={result.snapshot.expenseChangeAmount > 0 ? "danger" : "default"}
             />
             <SummaryCard label="资产记录" value={`${result.snapshot.assetSummary.length} 类`} />
@@ -206,12 +239,15 @@ export function AIAnalysisPage() {
               ))}
             </DataPanel>
 
-            <DataPanel title="成员支出">
+            <DataPanel title="成员收支">
               {result.snapshot.memberStats.map((member) => (
                 <div key={member.memberId} className="rounded-md border p-3">
-                  <div className="flex items-center justify-between text-sm">
+                  <div className="flex items-center justify-between gap-3 text-sm">
                     <span className="font-medium">{member.memberName}</span>
-                    <span>{formatCurrency(member.expense)}</span>
+                    <span className="text-right">
+                      <span className="text-green-600">收 {formatCurrency(member.income)}</span>
+                      <span className="ml-2">支 {formatCurrency(member.expense)}</span>
+                    </span>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {member.percentage}% · {member.expenseCount} 笔
@@ -272,11 +308,25 @@ export function AIAnalysisPage() {
   );
 }
 
-function SummaryCard({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "danger" }) {
+function SummaryCard({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "danger" | "success";
+}) {
   return (
     <div className="rounded-lg border bg-card p-4">
       <p className="text-sm text-muted-foreground">{label}</p>
-      <p className={`mt-1 text-2xl font-bold ${tone === "danger" ? "text-red-500" : ""}`}>{value}</p>
+      <p
+        className={`mt-1 text-2xl font-bold ${
+          tone === "danger" ? "text-red-500" : tone === "success" ? "text-green-600" : ""
+        }`}
+      >
+        {value}
+      </p>
     </div>
   );
 }

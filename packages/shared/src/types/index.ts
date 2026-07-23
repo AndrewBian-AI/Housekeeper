@@ -352,7 +352,11 @@ export interface FinancialAnalysisRecurringCandidate {
 export interface FinancialAnalysisSnapshot {
   month: string;
   period: string;
+  totalIncome: number;
   totalExpense: number;
+  netCashFlow: number;
+  savingsRate: number | null;
+  incomeTransactionCount: number | null;
   previousMonthExpense: number;
   expenseChangeAmount: number;
   expenseChangePercentage: number | null;
@@ -375,7 +379,10 @@ export interface FinancialAnalysisResponse {
 export interface FinancialAnalysisSummary {
   month: string;
   generatedAt: string;
+  totalIncome: number;
   totalExpense: number;
+  netCashFlow: number;
+  savingsRate: number | null;
   expenseTransactionCount: number;
   expenseChangeAmount: number;
 }
