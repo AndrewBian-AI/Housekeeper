@@ -32,12 +32,13 @@ services:
     image: cloudflare/cloudflared:latest
     container_name: housekeeper-cloudflared
     restart: unless-stopped
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?请在 deploy/openilink-hub/.env 中填写 CLOUDFLARE_TUNNEL_TOKEN}
     command:
       - tunnel
       - --no-autoupdate
       - --protocol
       - http2
-      - --url
-      - http://integration-gateway:80
+      - run
     depends_on:
       - integration-gateway

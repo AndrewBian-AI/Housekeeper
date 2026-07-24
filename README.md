@@ -81,7 +81,9 @@ docker compose up -d --build
 
 1. 部署 [OpenILink Hub](https://github.com/openilink/openilink-hub)（本仓库 `deploy/openilink-hub/` 提供了一份 docker-compose 模板）。
 2. 在 Hub 创建机器人应用，拿到 App / Bot / Secret 信息。
-3. 把 Webhook 回调设为 `https://<你的域名>/hub/webhook`（微信回调需 HTTPS）。
+3. 若使用本仓库的同一套 Compose 配置，把 Webhook 回调设为
+   `http://integration-gateway:80/hub/webhook`；若 Hub 独立部署，则使用可访问的
+   `https://<你的域名>/hub/webhook`。
 4. 在后台「系统设置」填入 Hub 地址即可。
 
 之后在微信里直接对机器人说话即可记账，内置 `/help`、`/recent`、`/balance` 命令。

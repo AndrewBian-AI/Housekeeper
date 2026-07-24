@@ -1,12 +1,30 @@
-# 本地微信接入验证
+# 微信接入服务
 
 这套配置在 Mac 上启动三个服务：
 
 - OpenILink Hub：连接微信并收发消息。
 - integration-gateway：只允许访问 Housekeeper 的微信接入路径。
-- cloudflared：创建临时 HTTPS 公网地址，不需要路由器端口映射。
+- cloudflared：通过固定域名的 Cloudflare Tunnel 提供 HTTPS 入口，不需要路由器端口映射。
 
-## 1. 启动
+## 1. 配置固定隧道
+
+在 Cloudflare Zero Trust 中创建远程管理的 Tunnel，并在连接器页面选择 Docker。
+复制页面命令中 `--token` 后面的 Token，但不要把 Token 发给他人或提交到 Git。
+
+在本目录的 `.env` 文件末尾增加：
+
+```text
+CLOUDFLARE_TUNNEL_TOKEN=你的Tunnel-Token
+```
+
+在 Tunnel 的 Public Hostname 中配置：
+
+- 子域名：`wechat`
+- 域名：你在 Cloudflare 中托管的域名
+- 服务类型：`HTTP`
+- URL：`http://integration-gateway:80`
+
+## 2. 启动
 
 请先确认主项目 Housekeeper 正在运行，然后在终端进入本目录：
 
@@ -18,25 +36,20 @@ docker compose ps
 
 首次启动需要下载镜像，可能需要等待几分钟。
 
-## 2. 获取临时公网地址
+## 3. 验证固定公网地址
 
 ```bash
-docker compose logs cloudflared --tail=100
+curl -s -o /dev/null -w "%{http_code}\n" https://wechat.你的域名/manifest.json
+curl -s -o /dev/null -w "%{http_code}\n" https://wechat.你的域名/
 ```
 
-在输出中找到形如下面的地址：
+第一条应返回 `200`，第二条应返回 `404`。这说明公网只能进入微信接入所需的路径，
+没有暴露账本登录页。
 
-```text
-https://随机字符.trycloudflare.com
-```
-
-这个地址是临时的。重新创建 cloudflared 容器后可能变化，变化后需要同步更新
-Housekeeper 的“系统公网地址”和 OpenILink Hub 中的应用配置。
-
-## 3. Housekeeper 系统设置
+## 4. Housekeeper 系统设置
 
 - Hub 地址：`http://host.docker.internal:9800`
-- 系统公网地址：上一步获得的 `https://随机字符.trycloudflare.com`
+- 系统公网地址：`https://wechat.你的域名`
 
 保存后，外部只可访问以下路径：
 
@@ -47,7 +60,7 @@ Housekeeper 的“系统公网地址”和 OpenILink Hub 中的应用配置。
 
 账本登录页和管理接口不会通过这个入口开放。
 
-## 4. 打开 Hub
+## 5. 打开 Hub
 
 在 Mac 浏览器访问：
 
@@ -60,8 +73,9 @@ Housekeeper 私有应用：
 
 1. 创建应用，名称可填写「家庭管理系统」。
 2. 在「事件订阅」中填写
-   `https://你的临时域名/hub/webhook`，验证通过后订阅
-   `message.text` 和 `message.image`。
+   `http://integration-gateway:80/hub/webhook`，验证通过后订阅
+   `message.text` 和 `message.image`。Hub 与接入网关位于同一个 Compose 网络时，
+   使用内部地址可避免消息绕行公网；Housekeeper 的“系统公网地址”仍使用固定 HTTPS 域名。
 3. 在「OAuth 权限」中仅启用 `message:read` 和 `message:write`。
 4. 在「安装管理」中选择已连接的 Bot，Handle 填写 `housekeeper` 并安装。
 
@@ -71,7 +85,7 @@ Housekeeper 私有应用：
 实际使用时，在微信里打开扫码后出现的 **ClawBot 会话**，直接发送 `/help` 或记账
 内容；不需要让另一个好友给扫码微信号发消息，也不需要输入 `@housekeeper`。
 
-## 5. 停止与恢复
+## 6. 停止与恢复
 
 停止微信接入服务：
 
@@ -87,7 +101,5 @@ docker compose start
 
 仅停止这套服务不会删除 Hub 数据。不要手动删除本目录的 `data` 文件夹。
 
-## 使用边界
-
-Cloudflare Quick Tunnel 适合验证，不保证地址固定或持续可用。完成观察期后，应改用
-固定域名的正式 Tunnel，再作为长期微信入口。
+固定 Tunnel 的域名不会因为容器重启或网络重连而变化。Mac、Docker Desktop 和这套
+Compose 服务仍需保持运行，微信接入才会在线。
