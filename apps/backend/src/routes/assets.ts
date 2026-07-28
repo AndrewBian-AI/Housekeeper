@@ -4,6 +4,17 @@ import { assets, assetValuations } from "../db/schema.js";
 import { eq, and, sql, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { authGuard } from "../middleware/auth.js";
+import { getBusinessToday } from "../utils/date.js";
+import {
+  ALLOCATION_BUCKETS,
+  ASSET_TYPES,
+  firstError,
+  validateDate,
+  validateEnum,
+  validateMember,
+  validateNonNegative,
+  validateRequiredName,
+} from "./asset-validation.js";
 
 interface AssetBody {
   type: string;
@@ -14,8 +25,60 @@ interface AssetBody {
   accountInfo?: string;
   costBasis?: number;
   sortOrder?: number;
-  memberId?: string;
+  memberId?: string | null;
   note?: string;
+}
+
+function validateAssetBody(body: Record<string, unknown>): string | null {
+  return firstError(
+    validateRequiredName(body.name, "资产名称"),
+    validateEnum(body.type, ASSET_TYPES, "资产类型"),
+    validateEnum(body.allocationBucket, ALLOCATION_BUCKETS, "配置类别"),
+    validateNonNegative(body.amount, "当前价值", true),
+    validateNonNegative(body.costBasis, "成本金额"),
+    validateMember(body.memberId)
+  );
+}
+
+function upsertValuation(assetId: string, date: string, value: number, note?: string | null) {
+  const existing = db
+    .select()
+    .from(assetValuations)
+    .where(and(eq(assetValuations.assetId, assetId), eq(assetValuations.date, date)))
+    .get();
+  if (existing) {
+    db.update(assetValuations)
+      .set({ value, note: note === undefined ? existing.note : note })
+      .where(eq(assetValuations.id, existing.id))
+      .run();
+    return existing.id;
+  }
+
+  const id = nanoid();
+  db.insert(assetValuations)
+    .values({
+      id,
+      assetId,
+      date,
+      value,
+      note: note ?? null,
+      createdAt: new Date().toISOString(),
+    })
+    .run();
+  return id;
+}
+
+function syncCurrentAmount(assetId: string) {
+  const latest = db
+    .select()
+    .from(assetValuations)
+    .where(eq(assetValuations.assetId, assetId))
+    .orderBy(desc(assetValuations.date))
+    .get();
+  db.update(assets)
+    .set({ amount: latest?.value ?? 0, updatedAt: new Date().toISOString() })
+    .where(eq(assets.id, assetId))
+    .run();
 }
 
 export async function assetRoutes(app: FastifyInstance) {
@@ -55,18 +118,26 @@ export async function assetRoutes(app: FastifyInstance) {
     return asset;
   });
 
-  app.post<{ Body: AssetBody }>("/", async (request) => {
+  app.post<{ Body: AssetBody }>("/", async (request, reply) => {
     const body = request.body;
+    const normalized = {
+      ...body,
+      name: body.name?.trim(),
+      allocationBucket: body.allocationBucket ?? "stable",
+    };
+    const error = validateAssetBody(normalized);
+    if (error) return reply.status(400).send({ error });
+
     const id = nanoid();
     const now = new Date().toISOString();
     db.insert(assets)
       .values({
         id,
-        type: body.type,
-        name: body.name,
+        type: normalized.type,
+        name: normalized.name,
         amount: body.amount,
         currency: body.currency ?? "CNY",
-        allocationBucket: body.allocationBucket ?? "stable",
+        allocationBucket: normalized.allocationBucket,
         accountInfo: body.accountInfo ?? null,
         costBasis: body.costBasis ?? null,
         sortOrder: body.sortOrder ?? 0,
@@ -76,6 +147,7 @@ export async function assetRoutes(app: FastifyInstance) {
         updatedAt: now,
       })
       .run();
+    upsertValuation(id, getBusinessToday(), body.amount, "创建资产时的初始估值");
     return db.select().from(assets).where(eq(assets.id, id)).get();
   });
 
@@ -83,6 +155,14 @@ export async function assetRoutes(app: FastifyInstance) {
     const { id } = request.params;
     const existing = db.select().from(assets).where(eq(assets.id, id)).get();
     if (!existing) return reply.status(404).send({ error: "Not found" });
+
+    const merged = {
+      ...existing,
+      ...request.body,
+      name: typeof request.body.name === "string" ? request.body.name.trim() : existing.name,
+    };
+    const error = validateAssetBody(merged);
+    if (error) return reply.status(400).send({ error });
 
     const allowed = [
       "type",
@@ -103,16 +183,20 @@ export async function assetRoutes(app: FastifyInstance) {
     }
 
     db.update(assets).set(updates).where(eq(assets.id, id)).run();
+    if (request.body.amount !== undefined && request.body.amount !== existing.amount) {
+      upsertValuation(id, getBusinessToday(), request.body.amount as number, "修改资产当前价值");
+      syncCurrentAmount(id);
+    }
     return db.select().from(assets).where(eq(assets.id, id)).get();
   });
 
+  // 普通删除改为归档，保留资产及其估值历史。
   app.delete<{ Params: { id: string } }>("/:id", async (request, reply) => {
     const { id } = request.params;
     const existing = db.select().from(assets).where(eq(assets.id, id)).get();
     if (!existing) return reply.status(404).send({ error: "Not found" });
-    db.delete(assetValuations).where(eq(assetValuations.assetId, id)).run();
-    db.delete(assets).where(eq(assets.id, id)).run();
-    return { success: true };
+    db.update(assets).set({ isActive: false, updatedAt: new Date().toISOString() }).where(eq(assets.id, id)).run();
+    return { success: true, archived: true };
   });
 
   // ---- 资产估值快照 ----
@@ -134,29 +218,14 @@ export async function assetRoutes(app: FastifyInstance) {
       const asset = db.select().from(assets).where(eq(assets.id, id)).get();
       if (!asset) return reply.status(404).send({ error: "Not found" });
 
-      const vid = nanoid();
-      db.insert(assetValuations)
-        .values({
-          id: vid,
-          assetId: id,
-          date: request.body.date,
-          value: request.body.value,
-          note: request.body.note ?? null,
-          createdAt: new Date().toISOString(),
-        })
-        .run();
+      const dateError =
+        validateDate(request.body.date, "估值日期") ??
+        (request.body.date > getBusinessToday() ? "估值日期不能晚于今天" : null);
+      const error = firstError(dateError, validateNonNegative(request.body.value, "估值金额", true));
+      if (error) return reply.status(400).send({ error });
 
-      // 当前市值同步为最新一条快照的值
-      const latest = db
-        .select()
-        .from(assetValuations)
-        .where(eq(assetValuations.assetId, id))
-        .orderBy(desc(assetValuations.date))
-        .get();
-      if (latest && latest.id === vid) {
-        db.update(assets).set({ amount: request.body.value, updatedAt: new Date().toISOString() }).where(eq(assets.id, id)).run();
-      }
-
+      const vid = upsertValuation(id, request.body.date, request.body.value, request.body.note);
+      syncCurrentAmount(id);
       return db.select().from(assetValuations).where(eq(assetValuations.id, vid)).get();
     }
   );
@@ -166,6 +235,7 @@ export async function assetRoutes(app: FastifyInstance) {
     const existing = db.select().from(assetValuations).where(eq(assetValuations.id, vid)).get();
     if (!existing) return reply.status(404).send({ error: "Not found" });
     db.delete(assetValuations).where(eq(assetValuations.id, vid)).run();
+    syncCurrentAmount(existing.assetId);
     return { success: true };
   });
 }

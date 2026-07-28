@@ -1,6 +1,7 @@
 import type {
   AllocationBucket,
   AllocationStat,
+  AssetPreferences,
   AssetType,
   CompositionItem,
   EmergencyFundStat,
@@ -18,11 +19,12 @@ import {
   DEFAULT_TARGET_ALLOCATION,
 } from "@caiwu/shared";
 import type { FastifyInstance } from "fastify";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import { assetValuations, assets, insurancePolicies, liabilities, members, settings, transactions } from "../db/schema.js";
 import { authGuard } from "../middleware/auth.js";
-import { getBusinessToday } from "../utils/date.js";
+import { upsertSetting } from "../db/settings.js";
+import { getBusinessToday, normalizeDateString } from "../utils/date.js";
 
 const BUCKETS: AllocationBucket[] = ["liquid", "stable", "growth", "protection"];
 
@@ -78,14 +80,45 @@ function getMemberNameMap(): Map<string, string> {
   return new Map(db.select().from(members).all().map((m) => [m.id, m.name]));
 }
 
-function monthsAgo(months: number): string {
-  const now = new Date();
-  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - months, now.getUTCDate()));
-  return d.toISOString().slice(0, 10);
+function monthStart(year: number, monthIndex: number): string {
+  return new Date(Date.UTC(year, monthIndex, 1)).toISOString().slice(0, 10);
+}
+
+function monthEnd(year: number, monthIndex: number): string {
+  return new Date(Date.UTC(year, monthIndex + 1, 0)).toISOString().slice(0, 10);
+}
+
+function monthsInclusive(start: string, end: string): number {
+  const [sy, sm] = start.slice(0, 7).split("-").map(Number);
+  const [ey, em] = end.slice(0, 7).split("-").map(Number);
+  return (ey - sy) * 12 + em - sm + 1;
 }
 
 export async function netWorthRoutes(app: FastifyInstance) {
   app.addHook("preHandler", authGuard);
+
+  app.get("/preferences", async (): Promise<AssetPreferences> => ({
+    targetAllocation: getTargetAllocation(),
+    emergencyFundMonths: getEmergencyMonths(),
+  }));
+
+  app.put<{ Body: AssetPreferences }>("/preferences", async (request, reply) => {
+    const target = request.body?.targetAllocation;
+    const months = request.body?.emergencyFundMonths;
+    const validTarget =
+      target &&
+      BUCKETS.every((bucket) => Number.isFinite(target[bucket]) && target[bucket] >= 0 && target[bucket] <= 100);
+    if (!validTarget) return reply.status(400).send({ error: "资产配置比例必须是0%到100%之间的数字" });
+    const total = BUCKETS.reduce((sum, bucket) => sum + target[bucket], 0);
+    if (Math.abs(total - 100) > 0.001) return reply.status(400).send({ error: "四类资产配置比例合计必须等于100%" });
+    if (!Number.isInteger(months) || months < 1 || months > 24) {
+      return reply.status(400).send({ error: "应急资金目标月数必须是1到24之间的整数" });
+    }
+
+    upsertSetting("asset.target_allocation", JSON.stringify(target));
+    upsertSetting("asset.emergency_fund_months", String(months));
+    return { success: true };
+  });
 
   app.get("/overview", async (): Promise<NetWorthOverview> => {
     const assetList = getActiveAssets();
@@ -259,7 +292,7 @@ export async function netWorthRoutes(app: FastifyInstance) {
 
   // 净资产趋势：从估值快照聚合；负债无历史，按当前总额取平；总会追加「今天」一个点
   app.get("/trend", async (): Promise<{ data: NetWorthTrendPoint[] }> => {
-    const assetList = getActiveAssets();
+    const assetList = db.select().from(assets).all();
     const liabilityTotal = getActiveLiabilities().reduce((s, l) => s + (l.balance || 0), 0);
     const insuranceCashValue = getInsuranceCashValue();
     const valuations = db.select().from(assetValuations).orderBy(assetValuations.date).all();
@@ -280,7 +313,7 @@ export async function netWorthRoutes(app: FastifyInstance) {
       for (const a of assetList) {
         const snaps = byAsset.get(a.id);
         if (d === today) {
-          totalAssets += a.amount || 0; // 今天用当前市值
+          if (a.isActive) totalAssets += a.amount || 0; // 今天只计入当前有效资产
         } else if (snaps) {
           const applicable = snaps.filter((s) => s.date <= d);
           if (applicable.length > 0) totalAssets += applicable[applicable.length - 1].value;
@@ -303,21 +336,67 @@ export async function netWorthRoutes(app: FastifyInstance) {
       .filter((a) => (a.allocationBucket as AllocationBucket) === "liquid")
       .reduce((s, a) => s + (a.amount || 0), 0);
 
-    const since = monthsAgo(6);
-    const expenseRow = db
-      .select({ total: sql<number>`coalesce(sum(amount), 0)` })
+    const today = normalizeDateString(getBusinessToday())!;
+    const [currentYear, currentMonth, currentDay] = today.split("-").map(Number);
+    const completedEnd = monthEnd(currentYear, currentMonth - 2);
+    const windowStart = monthStart(currentYear, currentMonth - 7);
+
+    const completedExpense = db
+      .select({
+        total: sql<number>`coalesce(sum(amount), 0)`,
+        firstDate: sql<string | null>`min(transaction_date)`,
+      })
       .from(transactions)
-      .where(and(eq(transactions.type, "expense"), gte(transactions.transactionDate, since)))
+      .where(
+        and(
+          eq(transactions.type, "expense"),
+          gte(transactions.transactionDate, windowStart),
+          lte(transactions.transactionDate, completedEnd)
+        )
+      )
       .get();
-    const totalExpense6m = Number(expenseRow?.total || 0);
-    const averageMonthlyExpense = roundMoney(totalExpense6m / 6);
+
+    let totalExpense = Number(completedExpense?.total || 0);
+    let sampleStart: string | null = completedExpense?.firstDate
+      ? `${completedExpense.firstDate.slice(0, 7)}-01`
+      : null;
+    let sampleEnd: string | null = completedExpense?.firstDate ? completedEnd : null;
+    let sampleMonths = sampleStart && sampleEnd ? monthsInclusive(sampleStart, sampleEnd) : 0;
+    let usesPartialMonth = false;
+
+    // 尚无完整月份时，临时展示当月数据，但明确标记样本不足。
+    if (sampleMonths === 0) {
+      const currentStart = monthStart(currentYear, currentMonth - 1);
+      const currentExpense = db
+        .select({ total: sql<number>`coalesce(sum(amount), 0)` })
+        .from(transactions)
+        .where(
+          and(
+            eq(transactions.type, "expense"),
+            gte(transactions.transactionDate, currentStart),
+            lte(transactions.transactionDate, today)
+          )
+        )
+        .get();
+      totalExpense = Number(currentExpense?.total || 0);
+      if (totalExpense > 0) {
+        sampleStart = currentStart;
+        sampleEnd = today;
+        sampleMonths = 1;
+        usesPartialMonth = currentDay < Number(monthEnd(currentYear, currentMonth - 1).slice(-2));
+      }
+    }
+
+    const averageMonthlyExpense = sampleMonths > 0 ? roundMoney(totalExpense / sampleMonths) : 0;
 
     const targetMonths = getEmergencyMonths();
     const targetAmount = roundMoney(averageMonthlyExpense * targetMonths);
     const coverageMonths = averageMonthlyExpense > 0 ? roundMoney(liquidAssets / averageMonthlyExpense) : null;
 
     let status: EmergencyFundStat["status"] = "unknown";
-    if (averageMonthlyExpense > 0 && coverageMonths != null) {
+    const dataQuality: EmergencyFundStat["dataQuality"] =
+      !usesPartialMonth && sampleMonths >= 3 ? "sufficient" : "insufficient";
+    if (dataQuality === "sufficient" && averageMonthlyExpense > 0 && coverageMonths != null) {
       if (coverageMonths >= targetMonths) status = "sufficient";
       else if (coverageMonths >= targetMonths * 0.5) status = "warning";
       else status = "insufficient";
@@ -330,6 +409,11 @@ export async function netWorthRoutes(app: FastifyInstance) {
       targetAmount,
       coverageMonths,
       status,
+      sampleStart,
+      sampleEnd,
+      sampleMonths,
+      dataQuality,
+      usesPartialMonth,
     };
   });
 }

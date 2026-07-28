@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/api/client";
 import type { InsurancePolicy, InsuranceCategory, AssetFrequency, Member } from "@caiwu/shared";
 import { INSURANCE_CATEGORY_LABELS } from "@caiwu/shared";
-import { Plus, Trash2, Edit2 } from "lucide-react";
+import { Plus, Edit2, Archive, RotateCcw } from "lucide-react";
 import { formatCurrency } from "./helpers";
 
 const CATEGORIES = Object.keys(INSURANCE_CATEGORY_LABELS) as InsuranceCategory[];
@@ -22,16 +22,20 @@ const emptyForm = {
   premium: "",
   premiumFrequency: "" as AssetFrequency | "",
   cashValue: "",
+  startDate: "",
+  endDate: "",
   note: "",
 };
 
-export function InsuranceTab() {
+export function InsuranceTab({ onChanged }: { onChanged?: () => void }) {
   const [items, setItems] = useState<InsurancePolicy[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const [showArchived, setShowArchived] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     loadData();
@@ -52,27 +56,47 @@ export function InsuranceTab() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
+    if (!form.name.trim()) return setError("保单名称不能为空");
+    for (const [value, label] of [
+      [form.coverageAmount, "保额"],
+      [form.premium, "保费"],
+      [form.cashValue, "现金价值"],
+    ] as const) {
+      if (value !== "" && Number(value) < 0) return setError(`${label}不能为负数`);
+    }
+    if (form.startDate && form.endDate && form.endDate < form.startDate) {
+      return setError("保险结束日期不能早于开始日期");
+    }
     const body = {
-      name: form.name,
+      name: form.name.trim(),
       category: form.category,
-      insuredMemberId: form.insuredMemberId || undefined,
-      insurer: form.insurer || undefined,
-      coverageAmount: form.coverageAmount === "" ? undefined : Number(form.coverageAmount),
-      premium: form.premium === "" ? undefined : Number(form.premium),
-      premiumFrequency: form.premiumFrequency || undefined,
-      cashValue: form.cashValue === "" ? undefined : Number(form.cashValue),
-      note: form.note || undefined,
+      insuredMemberId: form.insuredMemberId || null,
+      insurer: form.insurer || null,
+      coverageAmount: form.coverageAmount === "" ? null : Number(form.coverageAmount),
+      premium: form.premium === "" ? null : Number(form.premium),
+      premiumFrequency: form.premiumFrequency || null,
+      cashValue: form.cashValue === "" ? null : Number(form.cashValue),
+      startDate: form.startDate || null,
+      endDate: form.endDate || null,
+      note: form.note || null,
     };
-    if (editingId) await api.put(`/insurance/${editingId}`, body);
-    else await api.post("/insurance", body);
-    closeForm();
-    loadData();
+    try {
+      if (editingId) await api.put(`/insurance/${editingId}`, body);
+      else await api.post("/insurance", body);
+      closeForm();
+      loadData();
+      onChanged?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "保存失败");
+    }
   };
 
   const closeForm = () => {
     setShowForm(false);
     setEditingId(null);
     setForm(emptyForm);
+    setError("");
   };
 
   const handleEdit = (p: InsurancePolicy) => {
@@ -86,31 +110,50 @@ export function InsuranceTab() {
       premium: p.premium == null ? "" : String(p.premium),
       premiumFrequency: p.premiumFrequency || "",
       cashValue: p.cashValue == null ? "" : String(p.cashValue),
+      startDate: p.startDate || "",
+      endDate: p.endDate || "",
       note: p.note || "",
     });
     setShowForm(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("确定删除该保单？")) return;
+  const handleArchive = async (id: string) => {
+    if (!confirm("确定归档该保单？归档后现金价值不再计入当前资产统计。")) return;
     await api.delete(`/insurance/${id}`);
     loadData();
+    onChanged?.();
   };
+
+  const handleRestore = async (id: string) => {
+    await api.put(`/insurance/${id}`, { isActive: true });
+    loadData();
+    onChanged?.();
+  };
+
+  const visibleItems = items.filter((item) => showArchived || item.isActive);
+  const archivedCount = items.filter((item) => !item.isActive).length;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">记录社保、商业医疗、寿险等保单；填写「现金价值」会计入净资产的保障部分</p>
-        <button
-          onClick={() => {
-            setForm(emptyForm);
-            setEditingId(null);
-            setShowForm(true);
-          }}
-          className="flex items-center gap-1 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground"
-        >
-          <Plus className="h-4 w-4" /> 新增保单
-        </button>
+        <div className="flex gap-2">
+          {archivedCount > 0 && (
+            <button onClick={() => setShowArchived((value) => !value)} className="rounded-md border px-3 py-2 text-sm">
+              {showArchived ? "隐藏已归档" : `查看已归档（${archivedCount}）`}
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setForm(emptyForm);
+              setEditingId(null);
+              setShowForm(true);
+            }}
+            className="flex items-center gap-1 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground"
+          >
+            <Plus className="h-4 w-4" /> 新增保单
+          </button>
+        </div>
       </div>
 
       <div className="overflow-hidden rounded-lg border bg-card">
@@ -135,16 +178,19 @@ export function InsuranceTab() {
                     加载中...
                   </td>
                 </tr>
-              ) : items.length === 0 ? (
+              ) : visibleItems.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-8 text-center text-muted-foreground">
                     暂无数据
                   </td>
                 </tr>
               ) : (
-                items.map((p) => (
-                  <tr key={p.id} className="border-b last:border-0 hover:bg-muted/30">
-                    <td className="px-4 py-2 font-medium">{p.name}</td>
+                visibleItems.map((p) => (
+                  <tr key={p.id} className={`border-b last:border-0 hover:bg-muted/30 ${p.isActive ? "" : "opacity-60"}`}>
+                    <td className="px-4 py-2 font-medium">
+                      {p.name}
+                      {!p.isActive && <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs">已归档</span>}
+                    </td>
                     <td className="px-4 py-2">{INSURANCE_CATEGORY_LABELS[p.category] || p.category}</td>
                     <td className="px-4 py-2 text-muted-foreground">{memberName(p.insuredMemberId)}</td>
                     <td className="px-4 py-2 text-right">{p.coverageAmount == null ? "-" : formatCurrency(p.coverageAmount)}</td>
@@ -155,12 +201,20 @@ export function InsuranceTab() {
                     <td className="px-4 py-2 text-right text-muted-foreground">{p.cashValue == null ? "-" : formatCurrency(p.cashValue)}</td>
                     <td className="px-4 py-2 text-muted-foreground">{p.note || "-"}</td>
                     <td className="px-4 py-2 text-right whitespace-nowrap">
-                      <button onClick={() => handleEdit(p)} className="p-1 hover:text-primary">
-                        <Edit2 className="h-4 w-4" />
-                      </button>
-                      <button onClick={() => handleDelete(p.id)} className="ml-1 p-1 hover:text-destructive">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {p.isActive ? (
+                        <>
+                          <button onClick={() => handleEdit(p)} className="p-1 hover:text-primary" title="编辑">
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button onClick={() => handleArchive(p.id)} className="ml-1 p-1 hover:text-destructive" title="归档">
+                            <Archive className="h-4 w-4" />
+                          </button>
+                        </>
+                      ) : (
+                        <button onClick={() => handleRestore(p.id)} className="p-1 hover:text-primary" title="恢复使用">
+                          <RotateCcw className="h-4 w-4" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -175,6 +229,7 @@ export function InsuranceTab() {
           <div className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-lg bg-card p-5 sm:p-6" onClick={(e) => e.stopPropagation()}>
             <h3 className="mb-4 font-bold">{editingId ? "编辑保单" : "新增保单"}</h3>
             <form onSubmit={handleSubmit} className="space-y-3">
+              {error && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
               <input type="text" placeholder="保单名称" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full rounded border px-3 py-2 text-sm" required />
               <div className="flex gap-2">
                 <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value as InsuranceCategory })} className="flex-1 rounded border px-3 py-2 text-sm">
@@ -195,8 +250,8 @@ export function InsuranceTab() {
               </div>
               <input type="text" placeholder="承保公司（可选）" value={form.insurer} onChange={(e) => setForm({ ...form, insurer: e.target.value })} className="w-full rounded border px-3 py-2 text-sm" />
               <div className="flex gap-2">
-                <input type="number" step="0.01" placeholder="保额（可选）" value={form.coverageAmount} onChange={(e) => setForm({ ...form, coverageAmount: e.target.value })} className="flex-1 rounded border px-3 py-2 text-sm" />
-                <input type="number" step="0.01" placeholder="保费（可选）" value={form.premium} onChange={(e) => setForm({ ...form, premium: e.target.value })} className="flex-1 rounded border px-3 py-2 text-sm" />
+                <input type="number" step="0.01" min="0" placeholder="保额（可选）" value={form.coverageAmount} onChange={(e) => setForm({ ...form, coverageAmount: e.target.value })} className="flex-1 rounded border px-3 py-2 text-sm" />
+                <input type="number" step="0.01" min="0" placeholder="保费（可选）" value={form.premium} onChange={(e) => setForm({ ...form, premium: e.target.value })} className="flex-1 rounded border px-3 py-2 text-sm" />
               </div>
               <div className="flex gap-2">
                 <select value={form.premiumFrequency} onChange={(e) => setForm({ ...form, premiumFrequency: e.target.value as AssetFrequency | "" })} className="flex-1 rounded border px-3 py-2 text-sm">
@@ -207,7 +262,17 @@ export function InsuranceTab() {
                     </option>
                   ))}
                 </select>
-                <input type="number" step="0.01" placeholder="现金价值（可选，计入净资产）" value={form.cashValue} onChange={(e) => setForm({ ...form, cashValue: e.target.value })} className="flex-1 rounded border px-3 py-2 text-sm" />
+                <input type="number" step="0.01" min="0" placeholder="现金价值（可选，计入净资产）" value={form.cashValue} onChange={(e) => setForm({ ...form, cashValue: e.target.value })} className="flex-1 rounded border px-3 py-2 text-sm" />
+              </div>
+              <div className="flex gap-2">
+                <label className="flex-1 text-xs text-muted-foreground">
+                  开始日期（可选）
+                  <input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} className="mt-1 w-full rounded border px-3 py-2 text-sm" />
+                </label>
+                <label className="flex-1 text-xs text-muted-foreground">
+                  结束日期（可选）
+                  <input type="date" min={form.startDate || undefined} value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} className="mt-1 w-full rounded border px-3 py-2 text-sm" />
+                </label>
               </div>
               <input type="text" placeholder="备注（可选）" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} className="w-full rounded border px-3 py-2 text-sm" />
               <div className="flex justify-end gap-2">

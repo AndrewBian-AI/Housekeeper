@@ -49,6 +49,12 @@ const SECTIONS = [
     fields: [
       { key: "hub.url", label: "Hub 地址", type: "text", placeholder: "https://hub.openilink.com" },
       { key: "hub.base_url", label: "系统公网地址", type: "text", placeholder: "https://your-domain.com" },
+      {
+        key: "wechat.help_message",
+        label: "/help 帮助文案",
+        type: "textarea",
+        placeholder: "输入微信中执行 /help 时回复的内容",
+      },
     ],
   },
 ];
@@ -110,7 +116,8 @@ export function SettingsPage() {
               <label className="text-sm font-medium">{field.label}</label>
               {field.type === "textarea" ? (
                 <textarea value={settings[field.key] || ""} onChange={(e) => handleChange(field.key, e.target.value)}
-                  placeholder={field.placeholder} rows={4} className="w-full px-3 py-2 border rounded text-sm resize-y" />
+                  placeholder={field.placeholder} rows={field.key === "wechat.help_message" ? 10 : 4}
+                  className="w-full px-3 py-2 border rounded text-sm resize-y" />
               ) : field.type === "toggle" ? (
                 <button onClick={() => handleChange(field.key, settings[field.key] === "true" ? "false" : "true")}
                   className={`px-3 py-1 rounded text-sm ${settings[field.key] === "true" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>

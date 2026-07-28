@@ -1,4 +1,4 @@
-import { sqliteTable, text, real, integer, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, real, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const members = sqliteTable("members", {
   id: text("id").primaryKey(),
@@ -87,7 +87,10 @@ export const assetValuations = sqliteTable(
     note: text("note"),
     createdAt: text("created_at").notNull().default("(datetime('now'))"),
   },
-  (table) => [index("idx_asset_valuations_asset").on(table.assetId)]
+  (table) => [
+    index("idx_asset_valuations_asset").on(table.assetId),
+    uniqueIndex("idx_asset_valuations_asset_date").on(table.assetId, table.date),
+  ]
 );
 
 export const liabilities = sqliteTable("liabilities", {

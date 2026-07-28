@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/api/client";
 import type { Liability, LiabilityType, Asset, Member } from "@caiwu/shared";
 import { LIABILITY_TYPE_LABELS } from "@caiwu/shared";
-import { Plus, Trash2, Edit2 } from "lucide-react";
+import { Plus, Edit2, Archive, RotateCcw } from "lucide-react";
 import { formatCurrency, formatPercent } from "./helpers";
 
 const TYPES = Object.keys(LIABILITY_TYPE_LABELS) as LiabilityType[];
@@ -27,6 +27,8 @@ export function LiabilitiesTab({ onChanged }: { onChanged?: () => void }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const [showArchived, setShowArchived] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     loadData();
@@ -53,28 +55,42 @@ export function LiabilitiesTab({ onChanged }: { onChanged?: () => void }) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
+    if (!form.name.trim()) return setError("负债名称不能为空");
+    if (form.balance === "" || Number(form.balance) < 0) return setError("当前剩余本金必须是大于或等于0的数字");
+    if (form.originalAmount !== "" && Number(form.originalAmount) < Number(form.balance)) {
+      return setError("原始金额不能小于当前剩余本金");
+    }
+    if (form.interestRate !== "" && (Number(form.interestRate) < 0 || Number(form.interestRate) > 100)) {
+      return setError("年利率必须在0%到100%之间");
+    }
     const body = {
       type: form.type,
-      name: form.name,
+      name: form.name.trim(),
       balance: Number(form.balance),
-      originalAmount: form.originalAmount === "" ? undefined : Number(form.originalAmount),
-      interestRate: form.interestRate === "" ? undefined : Number(form.interestRate),
-      monthlyPayment: form.monthlyPayment === "" ? undefined : Number(form.monthlyPayment),
-      memberId: form.memberId || undefined,
-      linkedAssetId: form.linkedAssetId || undefined,
-      note: form.note || undefined,
+      originalAmount: form.originalAmount === "" ? null : Number(form.originalAmount),
+      interestRate: form.interestRate === "" ? null : Number(form.interestRate),
+      monthlyPayment: form.monthlyPayment === "" ? null : Number(form.monthlyPayment),
+      memberId: form.memberId || null,
+      linkedAssetId: form.linkedAssetId || null,
+      note: form.note || null,
     };
-    if (editingId) await api.put(`/liabilities/${editingId}`, body);
-    else await api.post("/liabilities", body);
-    closeForm();
-    loadData();
-    onChanged?.();
+    try {
+      if (editingId) await api.put(`/liabilities/${editingId}`, body);
+      else await api.post("/liabilities", body);
+      closeForm();
+      loadData();
+      onChanged?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "保存失败");
+    }
   };
 
   const closeForm = () => {
     setShowForm(false);
     setEditingId(null);
     setForm(emptyForm);
+    setError("");
   };
 
   const handleEdit = (l: Liability) => {
@@ -93,27 +109,43 @@ export function LiabilitiesTab({ onChanged }: { onChanged?: () => void }) {
     setShowForm(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("确定删除该负债？")) return;
+  const handleArchive = async (id: string) => {
+    if (!confirm("确定归档该负债？归档后不计入当前负债和净资产统计。")) return;
     await api.delete(`/liabilities/${id}`);
     loadData();
     onChanged?.();
   };
 
+  const handleRestore = async (id: string) => {
+    await api.put(`/liabilities/${id}`, { isActive: true });
+    loadData();
+    onChanged?.();
+  };
+
+  const visibleItems = items.filter((item) => showArchived || item.isActive);
+  const archivedCount = items.filter((item) => !item.isActive).length;
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">记录房贷、车贷、信用卡等负债，用于计算净资产</p>
-        <button
-          onClick={() => {
-            setForm(emptyForm);
-            setEditingId(null);
-            setShowForm(true);
-          }}
-          className="flex items-center gap-1 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground"
-        >
-          <Plus className="h-4 w-4" /> 新增负债
-        </button>
+        <div className="flex gap-2">
+          {archivedCount > 0 && (
+            <button onClick={() => setShowArchived((value) => !value)} className="rounded-md border px-3 py-2 text-sm">
+              {showArchived ? "隐藏已归档" : `查看已归档（${archivedCount}）`}
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setForm(emptyForm);
+              setEditingId(null);
+              setShowForm(true);
+            }}
+            className="flex items-center gap-1 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground"
+          >
+            <Plus className="h-4 w-4" /> 新增负债
+          </button>
+        </div>
       </div>
 
       <div className="overflow-hidden rounded-lg border bg-card">
@@ -138,16 +170,19 @@ export function LiabilitiesTab({ onChanged }: { onChanged?: () => void }) {
                     加载中...
                   </td>
                 </tr>
-              ) : items.length === 0 ? (
+              ) : visibleItems.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-8 text-center text-muted-foreground">
                     暂无数据
                   </td>
                 </tr>
               ) : (
-                items.map((l) => (
-                  <tr key={l.id} className="border-b last:border-0 hover:bg-muted/30">
-                    <td className="px-4 py-2 font-medium">{l.name}</td>
+                visibleItems.map((l) => (
+                  <tr key={l.id} className={`border-b last:border-0 hover:bg-muted/30 ${l.isActive ? "" : "opacity-60"}`}>
+                    <td className="px-4 py-2 font-medium">
+                      {l.name}
+                      {!l.isActive && <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs">已归档</span>}
+                    </td>
                     <td className="px-4 py-2">{LIABILITY_TYPE_LABELS[l.type] || l.type}</td>
                     <td className="px-4 py-2 text-right font-medium text-red-500">{formatCurrency(l.balance)}</td>
                     <td className="px-4 py-2 text-right text-muted-foreground">
@@ -157,12 +192,20 @@ export function LiabilitiesTab({ onChanged }: { onChanged?: () => void }) {
                     <td className="px-4 py-2 text-muted-foreground">{assetName(l.linkedAssetId) || "-"}</td>
                     <td className="px-4 py-2 text-muted-foreground">{memberName(l.memberId)}</td>
                     <td className="px-4 py-2 text-right whitespace-nowrap">
-                      <button onClick={() => handleEdit(l)} className="p-1 hover:text-primary">
-                        <Edit2 className="h-4 w-4" />
-                      </button>
-                      <button onClick={() => handleDelete(l.id)} className="ml-1 p-1 hover:text-destructive">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {l.isActive ? (
+                        <>
+                          <button onClick={() => handleEdit(l)} className="p-1 hover:text-primary" title="编辑">
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button onClick={() => handleArchive(l.id)} className="ml-1 p-1 hover:text-destructive" title="归档">
+                            <Archive className="h-4 w-4" />
+                          </button>
+                        </>
+                      ) : (
+                        <button onClick={() => handleRestore(l.id)} className="p-1 hover:text-primary" title="恢复使用">
+                          <RotateCcw className="h-4 w-4" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -177,6 +220,7 @@ export function LiabilitiesTab({ onChanged }: { onChanged?: () => void }) {
           <div className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-lg bg-card p-5 sm:p-6" onClick={(e) => e.stopPropagation()}>
             <h3 className="mb-4 font-bold">{editingId ? "编辑负债" : "新增负债"}</h3>
             <form onSubmit={handleSubmit} className="space-y-3">
+              {error && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
               <input type="text" placeholder="名称" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full rounded border px-3 py-2 text-sm" required />
               <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as LiabilityType })} className="w-full rounded border px-3 py-2 text-sm">
                 {TYPES.map((t) => (
@@ -185,15 +229,15 @@ export function LiabilitiesTab({ onChanged }: { onChanged?: () => void }) {
                   </option>
                 ))}
               </select>
-              <input type="number" step="0.01" placeholder="当前剩余本金" value={form.balance} onChange={(e) => setForm({ ...form, balance: e.target.value })} className="w-full rounded border px-3 py-2 text-sm" required />
+              <input type="number" step="0.01" min="0" placeholder="当前剩余本金" value={form.balance} onChange={(e) => setForm({ ...form, balance: e.target.value })} className="w-full rounded border px-3 py-2 text-sm" required />
               <div className="flex gap-2">
-                <input type="number" step="0.01" placeholder="原始金额（可选）" value={form.originalAmount} onChange={(e) => setForm({ ...form, originalAmount: e.target.value })} className="w-full flex-1 rounded border px-3 py-2 text-sm" />
-                <input type="number" step="0.01" placeholder="月供（可选）" value={form.monthlyPayment} onChange={(e) => setForm({ ...form, monthlyPayment: e.target.value })} className="w-full flex-1 rounded border px-3 py-2 text-sm" />
+                <input type="number" step="0.01" min="0" placeholder="原始金额（可选）" value={form.originalAmount} onChange={(e) => setForm({ ...form, originalAmount: e.target.value })} className="w-full flex-1 rounded border px-3 py-2 text-sm" />
+                <input type="number" step="0.01" min="0" placeholder="月供（可选）" value={form.monthlyPayment} onChange={(e) => setForm({ ...form, monthlyPayment: e.target.value })} className="w-full flex-1 rounded border px-3 py-2 text-sm" />
               </div>
-              <input type="number" step="0.01" placeholder="年利率 %（可选）" value={form.interestRate} onChange={(e) => setForm({ ...form, interestRate: e.target.value })} className="w-full rounded border px-3 py-2 text-sm" />
+              <input type="number" step="0.01" min="0" max="100" placeholder="年利率 %（可选）" value={form.interestRate} onChange={(e) => setForm({ ...form, interestRate: e.target.value })} className="w-full rounded border px-3 py-2 text-sm" />
               <select value={form.linkedAssetId} onChange={(e) => setForm({ ...form, linkedAssetId: e.target.value })} className="w-full rounded border px-3 py-2 text-sm">
                 <option value="">关联资产（如房贷↔房产，可选）</option>
-                {assets.map((a) => (
+                {assets.filter((a) => a.isActive).map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name}
                   </option>

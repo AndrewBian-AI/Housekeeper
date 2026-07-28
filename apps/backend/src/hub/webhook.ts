@@ -9,6 +9,7 @@ import { parseImageTransaction } from "../ai/dashscope.js";
 import { downloadMediaAsDataUrl } from "./media.js";
 import { sendBotMessage } from "./bot-api.js";
 import { getMonthDateRange } from "../utils/date.js";
+import { getWechatHelpMessage } from "./help-message.js";
 
 interface LegacyHubEvent {
   type?: string;
@@ -355,18 +356,7 @@ async function handleCommand(command: string, senderId: string, installationId: 
     await sendBotMessage(
       installationId,
       senderId,
-      `记账助手使用指南：
-直接发送消费信息即可记录，例如：
-  "午饭花了35块"
-  "打车20元"
-  "发工资了15000"
-  "补录 5月20日 午饭23元"
-  "昨天买菜68元"
-
-命令：
-  /help - 查看帮助
-  /recent - 查看最近5笔记录
-  /balance - 查看本月收支`,
+      getWechatHelpMessage(),
       traceId
     );
   } else if (cmd === "/recent") {
@@ -383,8 +373,7 @@ async function handleCommand(command: string, senderId: string, installationId: 
     const recent = db
       .select()
       .from(txTable)
-      .where(eq(txTable.memberId, member.id))
-      .orderBy(desc(txTable.createdAt))
+      .orderBy(desc(txTable.transactionDate), desc(txTable.createdAt))
       .limit(5)
       .all();
 
@@ -395,11 +384,12 @@ async function handleCommand(command: string, senderId: string, installationId: 
 
     const lines = recent.map((t) => {
       const cat = db.select().from(catTable).where(eq(catTable.id, t.categoryId)).get();
+      const recordMember = db.select().from(memTable).where(eq(memTable.id, t.memberId)).get();
       const typeLabel = t.type === "expense" ? "支出" : "收入";
-      return `${t.transactionDate} ${cat?.name || ""} ${typeLabel} ${t.amount.toFixed(2)}元 - ${t.description}`;
+      return `${t.transactionDate} ${recordMember?.name || "未知成员"} ${cat?.name || ""} ${typeLabel} ${t.amount.toFixed(2)}元 - ${t.description}`;
     });
 
-    await sendBotMessage(installationId, senderId, `最近5笔记录：\n${lines.join("\n")}`, traceId);
+    await sendBotMessage(installationId, senderId, `家庭最近5笔记录：\n${lines.join("\n")}`, traceId);
   } else if (cmd === "/balance") {
     const { start: startDate, end: endDate } = getMonthDateRange();
 
@@ -420,7 +410,6 @@ async function handleCommand(command: string, senderId: string, installationId: 
       .from(txTable)
       .where(
         and(
-          eq(txTable.memberId, member.id),
           gte(txTable.transactionDate, startDate),
           lte(txTable.transactionDate, endDate)
         )
@@ -434,7 +423,7 @@ async function handleCommand(command: string, senderId: string, installationId: 
     await sendBotMessage(
       installationId,
       senderId,
-      `本月收支：\n收入：${income.toFixed(2)} 元\n支出：${expense.toFixed(2)} 元\n结余：${(income - expense).toFixed(2)} 元`,
+      `家庭本月收支：\n收入：${Number(income).toFixed(2)} 元\n支出：${Number(expense).toFixed(2)} 元\n结余：${(Number(income) - Number(expense)).toFixed(2)} 元`,
       traceId
     );
   } else {

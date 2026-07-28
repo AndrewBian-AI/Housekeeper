@@ -6,7 +6,7 @@ import {
   ALLOCATION_BUCKET_LABELS,
   ASSET_TYPE_TO_BUCKET,
 } from "@caiwu/shared";
-import { Plus, Trash2, Edit2, LineChart } from "lucide-react";
+import { Plus, Trash2, Edit2, LineChart, Archive, RotateCcw } from "lucide-react";
 import { formatCurrency } from "./helpers";
 import { getBusinessToday } from "@/lib/date";
 
@@ -32,6 +32,8 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [valuationFor, setValuationFor] = useState<Asset | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     loadData();
@@ -52,27 +54,36 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
+    if (!form.name.trim()) return setError("资产名称不能为空");
+    if (form.amount === "" || Number(form.amount) < 0) return setError("当前价值必须是大于或等于0的数字");
+    if (form.costBasis !== "" && Number(form.costBasis) < 0) return setError("成本金额不能为负数");
     const body = {
       type: form.type,
-      name: form.name,
+      name: form.name.trim(),
       amount: Number(form.amount),
       allocationBucket: form.allocationBucket,
-      accountInfo: form.accountInfo || undefined,
-      costBasis: form.costBasis === "" ? undefined : Number(form.costBasis),
-      memberId: form.memberId || undefined,
-      note: form.note || undefined,
+      accountInfo: form.accountInfo || null,
+      costBasis: form.costBasis === "" ? null : Number(form.costBasis),
+      memberId: form.memberId || null,
+      note: form.note || null,
     };
-    if (editingId) await api.put(`/assets/${editingId}`, body);
-    else await api.post("/assets", body);
-    closeForm();
-    loadData();
-    onChanged?.();
+    try {
+      if (editingId) await api.put(`/assets/${editingId}`, body);
+      else await api.post("/assets", body);
+      closeForm();
+      loadData();
+      onChanged?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "保存失败");
+    }
   };
 
   const closeForm = () => {
     setShowForm(false);
     setEditingId(null);
     setForm(emptyForm);
+    setError("");
   };
 
   const handleEdit = (a: Asset) => {
@@ -90,27 +101,43 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
     setShowForm(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("确定删除该资产？相关估值记录也会删除")) return;
+  const handleArchive = async (id: string) => {
+    if (!confirm("确定归档该资产？归档后不计入当前统计，但估值历史会保留。")) return;
     await api.delete(`/assets/${id}`);
     loadData();
     onChanged?.();
   };
 
+  const handleRestore = async (id: string) => {
+    await api.put(`/assets/${id}`, { isActive: true });
+    loadData();
+    onChanged?.();
+  };
+
+  const visibleAssets = assets.filter((asset) => showArchived || asset.isActive);
+  const archivedCount = assets.filter((asset) => !asset.isActive).length;
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">记录所有资产，新建资产会按大类自动归入配置象限，可手动调整</p>
-        <button
-          onClick={() => {
-            setForm(emptyForm);
-            setEditingId(null);
-            setShowForm(true);
-          }}
-          className="flex items-center gap-1 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground"
-        >
-          <Plus className="h-4 w-4" /> 新增资产
-        </button>
+        <div className="flex gap-2">
+          {archivedCount > 0 && (
+            <button onClick={() => setShowArchived((value) => !value)} className="rounded-md border px-3 py-2 text-sm">
+              {showArchived ? "隐藏已归档" : `查看已归档（${archivedCount}）`}
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setForm(emptyForm);
+              setEditingId(null);
+              setShowForm(true);
+            }}
+            className="flex items-center gap-1 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground"
+          >
+            <Plus className="h-4 w-4" /> 新增资产
+          </button>
+        </div>
       </div>
 
       <div className="overflow-hidden rounded-lg border bg-card">
@@ -135,16 +162,19 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
                     加载中...
                   </td>
                 </tr>
-              ) : assets.length === 0 ? (
+              ) : visibleAssets.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-8 text-center text-muted-foreground">
                     暂无数据
                   </td>
                 </tr>
               ) : (
-                assets.map((a) => (
-                  <tr key={a.id} className="border-b last:border-0 hover:bg-muted/30">
-                    <td className="px-4 py-2 font-medium">{a.name}</td>
+                visibleAssets.map((a) => (
+                  <tr key={a.id} className={`border-b last:border-0 hover:bg-muted/30 ${a.isActive ? "" : "opacity-60"}`}>
+                    <td className="px-4 py-2 font-medium">
+                      {a.name}
+                      {!a.isActive && <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs">已归档</span>}
+                    </td>
                     <td className="px-4 py-2">{ASSET_TYPE_LABELS[a.type] || a.type}</td>
                     <td className="px-4 py-2">{ALLOCATION_BUCKET_LABELS[a.allocationBucket] || a.allocationBucket}</td>
                     <td className="px-4 py-2 text-muted-foreground">{a.accountInfo || "-"}</td>
@@ -154,15 +184,23 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
                     </td>
                     <td className="px-4 py-2 text-muted-foreground">{memberName(a.memberId)}</td>
                     <td className="px-4 py-2 text-right whitespace-nowrap">
-                      <button onClick={() => setValuationFor(a)} className="p-1 hover:text-primary" title="更新市值/查看趋势">
-                        <LineChart className="h-4 w-4" />
-                      </button>
-                      <button onClick={() => handleEdit(a)} className="ml-1 p-1 hover:text-primary">
-                        <Edit2 className="h-4 w-4" />
-                      </button>
-                      <button onClick={() => handleDelete(a.id)} className="ml-1 p-1 hover:text-destructive">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {a.isActive ? (
+                        <>
+                          <button onClick={() => setValuationFor(a)} className="p-1 hover:text-primary" title="更新市值/查看趋势">
+                            <LineChart className="h-4 w-4" />
+                          </button>
+                          <button onClick={() => handleEdit(a)} className="ml-1 p-1 hover:text-primary" title="编辑">
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button onClick={() => handleArchive(a.id)} className="ml-1 p-1 hover:text-destructive" title="归档">
+                            <Archive className="h-4 w-4" />
+                          </button>
+                        </>
+                      ) : (
+                        <button onClick={() => handleRestore(a.id)} className="p-1 hover:text-primary" title="恢复使用">
+                          <RotateCcw className="h-4 w-4" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -183,6 +221,7 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
           >
             <h3 className="mb-4 font-bold">{editingId ? "编辑资产" : "新增资产"}</h3>
             <form onSubmit={handleSubmit} className="space-y-3">
+              {error && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
               <input
                 type="text"
                 placeholder="资产名称"
@@ -227,6 +266,7 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
               <input
                 type="number"
                 step="0.01"
+                min="0"
                 placeholder="当前市值或余额"
                 value={form.amount}
                 onChange={(e) => setForm({ ...form, amount: e.target.value })}
@@ -236,6 +276,7 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
               <input
                 type="number"
                 step="0.01"
+                min="0"
                 placeholder="投入成本（投资类填，用于算收益，可选）"
                 value={form.costBasis}
                 onChange={(e) => setForm({ ...form, costBasis: e.target.value })}
@@ -298,6 +339,7 @@ function ValuationModal({ asset, onClose, onSaved }: { asset: Asset; onClose: ()
   const [history, setHistory] = useState<AssetValuation[]>([]);
   const [date, setDate] = useState(getBusinessToday());
   const [value, setValue] = useState(String(asset.amount));
+  const [error, setError] = useState("");
 
   useEffect(() => {
     api.get<AssetValuation[]>(`/assets/${asset.id}/valuations`).then(setHistory);
@@ -305,13 +347,19 @@ function ValuationModal({ asset, onClose, onSaved }: { asset: Asset; onClose: ()
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    await api.post(`/assets/${asset.id}/valuations`, { date, value: Number(value) });
-    const next = await api.get<AssetValuation[]>(`/assets/${asset.id}/valuations`);
-    setHistory(next);
-    onSaved();
+    setError("");
+    try {
+      await api.post(`/assets/${asset.id}/valuations`, { date, value: Number(value) });
+      const next = await api.get<AssetValuation[]>(`/assets/${asset.id}/valuations`);
+      setHistory(next);
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "估值保存失败");
+    }
   };
 
   const remove = async (vid: string) => {
+    if (!confirm("确定删除这条估值？如果它是最新记录，当前价值会自动恢复为上一条估值。")) return;
     await api.delete(`/assets/valuations/${vid}`);
     setHistory(await api.get<AssetValuation[]>(`/assets/${asset.id}/valuations`));
     onSaved();
@@ -321,12 +369,14 @@ function ValuationModal({ asset, onClose, onSaved }: { asset: Asset; onClose: ()
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:items-center" onClick={onClose}>
       <div className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-lg bg-card p-5 sm:p-6" onClick={(e) => e.stopPropagation()}>
         <h3 className="mb-1 font-bold">{asset.name} · 市值记录</h3>
-        <p className="mb-4 text-xs text-muted-foreground">记录每次市值，最新一条会同步为当前市值，并汇入净资产趋势</p>
+        <p className="mb-4 text-xs text-muted-foreground">记录每次市值；同一天重复记录会更新原值，最新记录会同步为当前价值</p>
+        {error && <p className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
         <form onSubmit={save} className="mb-4 flex gap-2">
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="rounded border px-2 py-2 text-sm" required />
+          <input type="date" max={getBusinessToday()} value={date} onChange={(e) => setDate(e.target.value)} className="rounded border px-2 py-2 text-sm" required />
           <input
             type="number"
             step="0.01"
+            min="0"
             placeholder="市值"
             value={value}
             onChange={(e) => setValue(e.target.value)}

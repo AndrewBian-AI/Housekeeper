@@ -126,6 +126,7 @@ function initDatabase() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_asset_valuations_asset ON asset_valuations(asset_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_asset_valuations_asset_date ON asset_valuations(asset_id, date);
     CREATE TABLE IF NOT EXISTS liabilities (
       id TEXT PRIMARY KEY,
       type TEXT NOT NULL,

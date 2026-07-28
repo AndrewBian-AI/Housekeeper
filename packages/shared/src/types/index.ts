@@ -326,6 +326,19 @@ export interface EmergencyFundStat {
   targetAmount: number;
   coverageMonths: number | null;
   status: "sufficient" | "warning" | "insufficient" | "unknown";
+  /** 实际用于计算月均支出的统计周期 */
+  sampleStart: string | null;
+  sampleEnd: string | null;
+  sampleMonths: number;
+  /** 少于3个完整月时仅供参考 */
+  dataQuality: "sufficient" | "insufficient";
+  /** 没有完整月份时是否临时采用了当月数据 */
+  usesPartialMonth: boolean;
+}
+
+export interface AssetPreferences {
+  targetAllocation: Record<AllocationBucket, number>;
+  emergencyFundMonths: number;
 }
 
 export interface FinancialAnalysisRequest {
