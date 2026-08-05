@@ -210,6 +210,37 @@ export function AIAnalysisPage() {
               tone={result.snapshot.expenseChangeAmount > 0 ? "danger" : "default"}
             />
             <SummaryCard label="资产记录" value={`${result.snapshot.assetSummary.length} 类`} />
+            <SummaryCard
+              label="月度预算"
+              value={
+                result.snapshot.budgetSnapshot?.monthly?.budgetId
+                  ? formatCurrency(result.snapshot.budgetSnapshot.monthly.totalBudget)
+                  : "未设置"
+              }
+            />
+            <SummaryCard
+              label="预算执行率"
+              value={
+                result.snapshot.budgetSnapshot?.monthly?.executionRate == null
+                  ? "无法计算"
+                  : `${result.snapshot.budgetSnapshot.monthly.executionRate}%`
+              }
+              tone={
+                (result.snapshot.budgetSnapshot?.monthly?.executionRate || 0) >= 100
+                  ? "danger"
+                  : "default"
+              }
+            />
+            <SummaryCard
+              label="预算外支出"
+              value={formatCurrency(result.snapshot.budgetSnapshot?.monthly?.outsideBudgetActual || 0)}
+              tone={(result.snapshot.budgetSnapshot?.monthly?.outsideBudgetActual || 0) > 0 ? "danger" : "default"}
+            />
+            <SummaryCard
+              label="预算预警"
+              value={`${result.snapshot.budgetSnapshot?.monthly?.warningCount || 0} 项`}
+              tone={(result.snapshot.budgetSnapshot?.monthly?.warningCount || 0) > 0 ? "danger" : "default"}
+            />
           </div>
 
           <div className="rounded-lg border bg-card p-4 sm:p-5">

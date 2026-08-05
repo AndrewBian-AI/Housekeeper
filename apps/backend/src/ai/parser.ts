@@ -1,7 +1,7 @@
 import { chatWithTools } from "./deepseek.js";
 import { getParsePrompt, RECORD_TRANSACTION_TOOL } from "./prompts.js";
 import { db } from "../db/connection.js";
-import { categories, transactions, members } from "../db/schema.js";
+import { annualProjects, categories, transactions, members } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { ParsedTransaction } from "@caiwu/shared";
@@ -11,6 +11,9 @@ export interface ParseResult {
   success: boolean;
   transaction?: ParsedTransaction;
   replyMessage: string;
+  transactionId?: string;
+  pendingProjectIds?: string[];
+  annualProjectName?: string;
 }
 
 export type RawParsedTransaction = ParsedTransaction & {
@@ -123,8 +126,42 @@ export function finalizeAndSave(
       member = db.select().from(members).where(eq(members.id, memberId)).get()!;
     }
 
-    // Save transaction
+    // 年度专项：唯一关键词命中时直接关联；AI 语义建议或多项命中时交给微信二次确认。
     const txId = nanoid();
+    const projectRows =
+      parsed.type === "expense"
+        ? db
+            .select()
+            .from(annualProjects)
+            .where(eq(annualProjects.isActive, true))
+            .all()
+            .filter((project) => project.year === Number(txDate.slice(0, 4)))
+        : [];
+    const normalizedInput = rawInput.toLowerCase();
+    const keywordMatches = projectRows.filter((project) => {
+      try {
+        const keywords = JSON.parse(project.keywords || "[]") as string[];
+        return keywords.some(
+          (keyword) =>
+            keyword.trim() && normalizedInput.includes(keyword.trim().toLowerCase())
+        );
+      } catch {
+        return false;
+      }
+    });
+    const aiCandidate = parsed.annualProjectName
+      ? projectRows.find((project) => project.name === parsed.annualProjectName)
+      : undefined;
+    const directProject = keywordMatches.length === 1 ? keywordMatches[0] : undefined;
+    const pendingProjects = directProject
+      ? []
+      : keywordMatches.length > 1
+        ? keywordMatches
+        : aiCandidate
+          ? [aiCandidate]
+          : [];
+
+    // Save transaction
     db.insert(transactions)
       .values({
         id: txId,
@@ -137,6 +174,7 @@ export function finalizeAndSave(
         source,
         aiRawInput: rawInput,
         aiConfidence: 1.0,
+        annualProjectId: directProject?.id || null,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       })
@@ -144,12 +182,17 @@ export function finalizeAndSave(
 
     const typeLabel = parsed.type === "expense" ? "支出" : "收入";
     const dateStr = txDate.slice(5).replace("-", "月") + "日";
-    const replyMessage = `已记录：${categoryRecord.name} ${typeLabel} ${parsed.amount.toFixed(2)} 元 - ${parsed.description} (${dateStr})`;
+    const replyMessage = `已记录：${categoryRecord.name} ${typeLabel} ${parsed.amount.toFixed(2)} 元 - ${parsed.description} (${dateStr})${
+      directProject ? `\n年度专项：${directProject.name}` : ""
+    }`;
 
     return {
       success: true,
       transaction: parsed,
       replyMessage,
+      transactionId: txId,
+      pendingProjectIds: pendingProjects.map((project) => project.id),
+      annualProjectName: directProject?.name,
     };
   } catch (error) {
     console.error("finalizeAndSave error:", error);

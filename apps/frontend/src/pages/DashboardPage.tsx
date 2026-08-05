@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/api/client";
-import type { CategoryStat, DashboardOverview, MemberStat, TrendDataPoint } from "@caiwu/shared";
-import { ArrowRight, Brain, ReceiptText, TrendingDown, WalletCards } from "lucide-react";
+import type { CategoryStat, DashboardOverview, MemberStat, MonthlyBudgetExecution, TrendDataPoint } from "@caiwu/shared";
+import { ArrowRight, Brain, PiggyBank, ReceiptText, TrendingDown, WalletCards } from "lucide-react";
+import { getBusinessToday } from "@/lib/date";
 import {
   Bar,
   BarChart,
@@ -34,6 +35,7 @@ export function DashboardPage() {
   const [categoryStats, setCategoryStats] = useState<CategoryStat[]>([]);
   const [memberStats, setMemberStats] = useState<MemberStat[]>([]);
   const [loading, setLoading] = useState(true);
+  const [budget, setBudget] = useState<MonthlyBudgetExecution | null>(null);
 
   useEffect(() => {
     loadData();
@@ -42,16 +44,18 @@ export function DashboardPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [overviewResult, trendResult, categoryResult, memberResult] = await Promise.all([
+      const [overviewResult, trendResult, categoryResult, memberResult, budgetResult] = await Promise.all([
         api.get<DashboardOverview>(`/dashboard/overview?period=${period}`),
         api.get<{ data: TrendDataPoint[] }>(`/dashboard/trend?period=${period}`),
         api.get<{ data: CategoryStat[] }>(`/dashboard/category-stats?type=expense&period=${period}`),
         api.get<{ data: MemberStat[] }>(`/dashboard/member-stats?period=${period}`),
+        api.get<MonthlyBudgetExecution>(`/budgets/monthly/${getBusinessToday().slice(0, 7)}`),
       ]);
       setOverview(overviewResult);
       setTrend(trendResult.data);
       setCategoryStats(categoryResult.data);
       setMemberStats(memberResult.data);
+      setBudget(budgetResult);
     } catch (err) {
       console.error("Failed to load dashboard:", err);
     } finally {
@@ -102,6 +106,35 @@ export function DashboardPage() {
           </div>
         </div>
         <ArrowRight className="h-5 w-5 text-muted-foreground" />
+      </Link>
+
+      <Link
+        to="/budgets"
+        className="block rounded-lg border bg-card p-4 transition-colors hover:bg-accent"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-amber-100 text-amber-700">
+              <PiggyBank className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="font-medium">本月预算执行</p>
+              <p className="text-sm text-muted-foreground">
+                {budget?.budgetId
+                  ? `预算 ${formatCurrency(budget.totalBudget)} · 日常支出 ${formatCurrency(budget.dailyActual)}`
+                  : "本月尚未设置预算"}
+              </p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className={`text-xl font-bold ${(budget?.executionRate || 0) >= 100 ? "text-red-600" : ""}`}>
+              {budget?.executionRate == null ? "--" : `${budget.executionRate}%`}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              预算外 {formatCurrency(budget?.outsideBudgetActual || 0)} · 预警 {budget?.warningCount || 0} 项
+            </p>
+          </div>
+        </div>
       </Link>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">

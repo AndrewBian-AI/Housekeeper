@@ -46,6 +46,7 @@ export const transactions = sqliteTable(
     source: text("source").notNull().default("admin"),
     aiRawInput: text("ai_raw_input"),
     aiConfidence: real("ai_confidence"),
+    annualProjectId: text("annual_project_id").references(() => annualProjects.id),
     createdAt: text("created_at").notNull().default("(datetime('now'))"),
     updatedAt: text("updated_at").notNull().default("(datetime('now'))"),
   },
@@ -114,6 +115,8 @@ export const insurancePolicies = sqliteTable("insurance_policies", {
   name: text("name").notNull(),
   category: text("category").notNull(),
   insuredMemberId: text("insured_member_id").references(() => members.id),
+  policyholderMemberId: text("policyholder_member_id").references(() => members.id),
+  policyNumber: text("policy_number"),
   insurer: text("insurer"),
   coverageAmount: real("coverage_amount"),
   premium: real("premium"),
@@ -121,11 +124,120 @@ export const insurancePolicies = sqliteTable("insurance_policies", {
   cashValue: real("cash_value"),
   startDate: text("start_date"),
   endDate: text("end_date"),
+  claimPhone: text("claim_phone"),
+  claimContact: text("claim_contact"),
+  claimContactPhone: text("claim_contact_phone"),
+  claimChannels: text("claim_channels"),
+  claimSteps: text("claim_steps"),
+  claimMaterials: text("claim_materials"),
+  claimNotes: text("claim_notes"),
   note: text("note"),
   isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
   createdAt: text("created_at").notNull().default("(datetime('now'))"),
   updatedAt: text("updated_at").notNull().default("(datetime('now'))"),
 });
+
+export const insuranceAttachments = sqliteTable(
+  "insurance_attachments",
+  {
+    id: text("id").primaryKey(),
+    policyId: text("policy_id").notNull().references(() => insurancePolicies.id),
+    type: text("type").notNull().default("other"),
+    filePath: text("file_path").notNull(),
+    originalFileName: text("original_file_name"),
+    caption: text("caption"),
+    createdAt: text("created_at").notNull().default("(datetime('now'))"),
+  },
+  (table) => [index("idx_insurance_attachments_policy").on(table.policyId)]
+);
+
+// ---- 家庭预算 ----
+
+export const annualProjects = sqliteTable(
+  "annual_projects",
+  {
+    id: text("id").primaryKey(),
+    year: integer("year").notNull(),
+    name: text("name").notNull(),
+    budgetAmount: real("budget_amount").notNull(),
+    startDate: text("start_date"),
+    endDate: text("end_date"),
+    keywords: text("keywords"),
+    note: text("note"),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    createdAt: text("created_at").notNull().default("(datetime('now'))"),
+    updatedAt: text("updated_at").notNull().default("(datetime('now'))"),
+  },
+  (table) => [
+    index("idx_annual_projects_year").on(table.year),
+    uniqueIndex("idx_annual_projects_year_name").on(table.year, table.name),
+  ]
+);
+
+export const monthlyBudgets = sqliteTable("monthly_budgets", {
+  id: text("id").primaryKey(),
+  month: text("month").notNull().unique(),
+  totalAmount: real("total_amount").notNull(),
+  note: text("note"),
+  createdAt: text("created_at").notNull().default("(datetime('now'))"),
+  updatedAt: text("updated_at").notNull().default("(datetime('now'))"),
+});
+
+export const monthlyBudgetItems = sqliteTable(
+  "monthly_budget_items",
+  {
+    id: text("id").primaryKey(),
+    budgetId: text("budget_id").notNull().references(() => monthlyBudgets.id),
+    categoryId: text("category_id").notNull().references(() => categories.id),
+    amount: real("amount").notNull(),
+    createdAt: text("created_at").notNull().default("(datetime('now'))"),
+  },
+  (table) => [
+    index("idx_monthly_budget_items_budget").on(table.budgetId),
+    uniqueIndex("idx_monthly_budget_items_budget_category").on(table.budgetId, table.categoryId),
+  ]
+);
+
+export const annualBudgets = sqliteTable("annual_budgets", {
+  id: text("id").primaryKey(),
+  year: integer("year").notNull().unique(),
+  expectedIncome: real("expected_income").notNull().default(0),
+  regularBudgetAmount: real("regular_budget_amount").notNull().default(0),
+  note: text("note"),
+  createdAt: text("created_at").notNull().default("(datetime('now'))"),
+  updatedAt: text("updated_at").notNull().default("(datetime('now'))"),
+});
+
+export const annualBudgetItems = sqliteTable(
+  "annual_budget_items",
+  {
+    id: text("id").primaryKey(),
+    budgetId: text("budget_id").notNull().references(() => annualBudgets.id),
+    categoryId: text("category_id").notNull().references(() => categories.id),
+    amount: real("amount").notNull(),
+    createdAt: text("created_at").notNull().default("(datetime('now'))"),
+  },
+  (table) => [
+    index("idx_annual_budget_items_budget").on(table.budgetId),
+    uniqueIndex("idx_annual_budget_items_budget_category").on(table.budgetId, table.categoryId),
+  ]
+);
+
+export const pendingProjectConfirmations = sqliteTable(
+  "pending_project_confirmations",
+  {
+    id: text("id").primaryKey(),
+    installationId: text("installation_id").notNull(),
+    senderId: text("sender_id").notNull(),
+    transactionId: text("transaction_id").notNull().references(() => transactions.id),
+    candidateProjectIds: text("candidate_project_ids").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    status: text("status").notNull().default("pending"),
+    createdAt: text("created_at").notNull().default("(datetime('now'))"),
+    updatedAt: text("updated_at").notNull().default("(datetime('now'))"),
+  },
+  (table) => [index("idx_pending_project_sender").on(table.installationId, table.senderId)]
+);
 
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),

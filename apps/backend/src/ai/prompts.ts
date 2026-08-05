@@ -1,5 +1,5 @@
 import { db } from "../db/connection.js";
-import { settings, categories } from "../db/schema.js";
+import { settings, categories, annualProjects } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { APP_TIME_ZONE, getBusinessToday } from "../utils/date.js";
 
@@ -13,9 +13,33 @@ function getCategoryAndDateContext(): string {
   const incomeCategories = allCategories.filter((c) => c.type === "income").map((c) => c.name);
 
   const today = getBusinessToday();
+  const projectLines = db
+    .select()
+    .from(annualProjects)
+    .where(eq(annualProjects.isActive, true))
+    .all()
+    .map((project) => {
+      let keywords: string[] = [];
+      try {
+        keywords = JSON.parse(project.keywords || "[]") as string[];
+      } catch {
+        keywords = [];
+      }
+      return `- ${project.year}年【${project.name}】；关键词：${keywords.join("、") || "未配置"}；说明：${project.note || "无"}`;
+    })
+    .join("\n");
 
   return `可用的支出分类：${expenseCategories.join("、")}
 可用的收入分类：${incomeCategories.join("、")}
+
+当前启用的年度专项：
+${projectLines || "- 暂无年度专项"}
+
+年度专项判断规则：
+1. 只有支出可以建议年度专项，收入的 annualProjectName 必须为空。
+2. 消息明确出现专项名称、关键词，或语义上很可能属于某专项时，可返回准确的 annualProjectName。
+3. 专项所属年份必须和 transactionDate 年份一致。
+4. 不确定时返回 null，不要虚构名称；后端会再次校验并在必要时让用户微信确认。
 
 日期规则（必须遵守）：
 1. 当前业务日期是 ${today}，时区是 ${APP_TIME_ZONE}。
@@ -129,6 +153,10 @@ export const RECORD_TRANSACTION_TOOL = {
         transactionDate: {
           type: "string",
           description: "交易日期，格式 YYYY-MM-DD",
+        },
+        annualProjectName: {
+          type: ["string", "null"],
+          description: "可能关联的年度专项名称；不确定或收入时返回 null",
         },
       },
       required: ["type", "amount", "description", "category"],

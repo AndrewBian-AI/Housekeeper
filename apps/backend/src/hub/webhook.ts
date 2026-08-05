@@ -10,6 +10,10 @@ import { downloadMediaAsDataUrl } from "./media.js";
 import { sendBotMessage } from "./bot-api.js";
 import { getMonthDateRange } from "../utils/date.js";
 import { getWechatHelpMessage } from "./help-message.js";
+import {
+  createProjectConfirmation,
+  handleProjectConfirmationReply,
+} from "./project-confirmation.js";
 
 interface LegacyHubEvent {
   type?: string;
@@ -263,6 +267,23 @@ async function processMessage(event: NormalizedWebhookEvent, logId: string, inst
     return;
   }
 
+  const confirmationReply = handleProjectConfirmationReply(
+    installationId,
+    senderId,
+    textContent
+  );
+  if (confirmationReply) {
+    await sendBotMessage(installationId, senderId, confirmationReply, event.traceId);
+    db.update(messageLog)
+      .set({
+        status: "saved",
+        parsedResult: JSON.stringify({ projectConfirmation: textContent }),
+      })
+      .where(eq(messageLog.id, logId))
+      .run();
+    return;
+  }
+
   try {
     const source = event.messageType === "voice" ? "wechat-voice" : "wechat";
     const result = await parseAndSaveMessage(textContent, senderId, source);
@@ -275,7 +296,23 @@ async function processMessage(event: NormalizedWebhookEvent, logId: string, inst
       .where(eq(messageLog.id, logId))
       .run();
 
-    await sendBotMessage(installationId, senderId, result.replyMessage, event.traceId);
+    const confirmationPrompt =
+      result.transactionId && result.pendingProjectIds?.length
+        ? createProjectConfirmation(
+            installationId,
+            senderId,
+            result.transactionId,
+            result.pendingProjectIds
+          )
+        : null;
+    await sendBotMessage(
+      installationId,
+      senderId,
+      confirmationPrompt
+        ? `${result.replyMessage}\n\n${confirmationPrompt}`
+        : result.replyMessage,
+      event.traceId
+    );
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : "Unknown error";
     db.update(messageLog)
@@ -337,7 +374,23 @@ async function processImageMessage(
       .where(eq(messageLog.id, logId))
       .run();
 
-    await sendBotMessage(installationId, senderId, result.replyMessage, event.traceId);
+    const confirmationPrompt =
+      result.transactionId && result.pendingProjectIds?.length
+        ? createProjectConfirmation(
+            installationId,
+            senderId,
+            result.transactionId,
+            result.pendingProjectIds
+          )
+        : null;
+    await sendBotMessage(
+      installationId,
+      senderId,
+      confirmationPrompt
+        ? `${result.replyMessage}\n\n${confirmationPrompt}`
+        : result.replyMessage,
+      event.traceId
+    );
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : "Unknown error";
     console.error("Error processing image message:", error);

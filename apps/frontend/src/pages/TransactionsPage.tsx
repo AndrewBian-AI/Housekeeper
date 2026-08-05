@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "@/api/client";
-import type { TransactionWithRelations, PaginatedResponse, Category, Member } from "@caiwu/shared";
+import type { TransactionWithRelations, PaginatedResponse, Category, Member, AnnualProject } from "@caiwu/shared";
 import { Plus, Trash2, Edit2 } from "lucide-react";
 import { getBusinessToday } from "@/lib/date";
 
@@ -15,6 +15,11 @@ function sourceLabel(source?: string): string {
   return (source && SOURCE_LABELS[source]) || "手动录入";
 }
 
+function categoryLabel(category?: Category | null): string {
+  if (!category) return "未知分类";
+  return `${category.name}${category.isActive ? "" : "（已归档）"}`;
+}
+
 export function TransactionsPage() {
   const [data, setData] = useState<TransactionWithRelations[]>([]);
   const [total, setTotal] = useState(0);
@@ -22,6 +27,7 @@ export function TransactionsPage() {
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<Category[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [annualProjects, setAnnualProjects] = useState<AnnualProject[]>([]);
   const [searchParams] = useSearchParams();
   const [filters, setFilters] = useState({
     type: searchParams.get("type") || "",
@@ -30,9 +36,11 @@ export function TransactionsPage() {
     startDate: searchParams.get("startDate") || "",
     endDate: searchParams.get("endDate") || "",
     keyword: searchParams.get("keyword") || "",
+    annualProjectId: searchParams.get("annualProjectId") || "",
   });
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [formError, setFormError] = useState("");
   const [form, setForm] = useState({
     type: "expense",
     amount: "",
@@ -41,6 +49,7 @@ export function TransactionsPage() {
     memberId: "",
     transactionDate: getBusinessToday(),
     note: "",
+    annualProjectId: "",
   });
 
   useEffect(() => {
@@ -50,6 +59,20 @@ export function TransactionsPage() {
   useEffect(() => {
     loadData();
   }, [page, filters]);
+
+  useEffect(() => {
+    if (form.type !== "expense" || !form.transactionDate) {
+      setAnnualProjects([]);
+      return;
+    }
+    const year = form.transactionDate.slice(0, 4);
+    api.get<AnnualProject[]>(`/budgets/projects?year=${year}&active=true`).then((projects) => {
+      setAnnualProjects(projects);
+      if (form.annualProjectId && !projects.some((item) => item.id === form.annualProjectId)) {
+        setForm((current) => ({ ...current, annualProjectId: "" }));
+      }
+    });
+  }, [form.type, form.transactionDate]);
 
   const loadMeta = async () => {
     const [cats, mems] = await Promise.all([
@@ -78,16 +101,25 @@ export function TransactionsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const body = { ...form, amount: Number(form.amount) };
-    if (editingId) {
-      await api.put(`/transactions/${editingId}`, body);
-    } else {
-      await api.post("/transactions", body);
+    setFormError("");
+    const body = {
+      ...form,
+      amount: Number(form.amount),
+      annualProjectId: form.annualProjectId || null,
+    };
+    try {
+      if (editingId) {
+        await api.put(`/transactions/${editingId}`, body);
+      } else {
+        await api.post("/transactions", body);
+      }
+      setShowForm(false);
+      setEditingId(null);
+      setForm({ type: "expense", amount: "", description: "", categoryId: "", memberId: members[0]?.id || "", transactionDate: getBusinessToday(), note: "", annualProjectId: "" });
+      loadData();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "保存失败");
     }
-    setShowForm(false);
-    setEditingId(null);
-    setForm({ type: "expense", amount: "", description: "", categoryId: "", memberId: members[0]?.id || "", transactionDate: getBusinessToday(), note: "" });
-    loadData();
   };
 
   const handleEdit = (t: TransactionWithRelations) => {
@@ -100,6 +132,7 @@ export function TransactionsPage() {
       memberId: t.memberId,
       transactionDate: t.transactionDate,
       note: t.note || "",
+      annualProjectId: t.annualProjectId || "",
     });
     setShowForm(true);
   };
@@ -111,14 +144,32 @@ export function TransactionsPage() {
   };
 
   const totalPages = Math.ceil(total / 20);
-  const filteredCategories = categories.filter((c) => !form.type || c.type === form.type);
+  const filteredCategories = categories.filter(
+    (c) =>
+      (!form.type || c.type === form.type) &&
+      (c.isActive || (Boolean(editingId) && c.id === form.categoryId))
+  );
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-xl font-bold">记账管理</h2>
         <button
-          onClick={() => { setShowForm(true); setEditingId(null); }}
+          onClick={() => {
+            setFormError("");
+            setShowForm(true);
+            setEditingId(null);
+            setForm({
+              type: "expense",
+              amount: "",
+              description: "",
+              categoryId: "",
+              memberId: members[0]?.id || "",
+              transactionDate: getBusinessToday(),
+              note: "",
+              annualProjectId: "",
+            });
+          }}
           className="flex items-center gap-1 px-3 py-2 bg-primary text-primary-foreground rounded-md text-sm"
         >
           <Plus className="h-4 w-4" /> 新增记录
@@ -138,12 +189,16 @@ export function TransactionsPage() {
         </select>
         <select value={filters.categoryId} onChange={(e) => setFilters({ ...filters, categoryId: e.target.value })} className="w-full rounded border px-2 py-2 text-sm sm:w-auto">
           <option value="">全部分类</option>
-          {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          {categories.map((c) => <option key={c.id} value={c.id}>{categoryLabel(c)}</option>)}
         </select>
         <input type="date" value={filters.startDate} onChange={(e) => setFilters({ ...filters, startDate: e.target.value })} className="w-full rounded border px-2 py-2 text-sm sm:w-auto" />
         <span className="text-sm text-muted-foreground self-center">至</span>
         <input type="date" value={filters.endDate} onChange={(e) => setFilters({ ...filters, endDate: e.target.value })} className="w-full rounded border px-2 py-2 text-sm sm:w-auto" />
         <input type="text" placeholder="搜索描述..." value={filters.keyword} onChange={(e) => setFilters({ ...filters, keyword: e.target.value })} className="w-full rounded border px-2 py-2 text-sm sm:w-auto" />
+        <select value={filters.annualProjectId} onChange={(e) => setFilters({ ...filters, annualProjectId: e.target.value })} className="w-full rounded border px-2 py-2 text-sm sm:w-auto">
+          <option value="">全部年度专项</option>
+          {annualProjects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
       </div>
 
       {/* Form Modal */}
@@ -152,24 +207,31 @@ export function TransactionsPage() {
           <div className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-lg bg-card p-5 sm:p-6" onClick={(e) => e.stopPropagation()}>
             <h3 className="font-bold mb-4">{editingId ? "编辑记录" : "新增记录"}</h3>
             <form onSubmit={handleSubmit} className="space-y-3">
+              {formError && <p className="rounded bg-red-50 p-2 text-sm text-red-600">{formError}</p>}
               <div className="flex gap-2">
                 <label className="flex items-center gap-1 text-sm">
                   <input type="radio" name="type" value="expense" checked={form.type === "expense"} onChange={() => setForm({ ...form, type: "expense", categoryId: "" })} /> 支出
                 </label>
                 <label className="flex items-center gap-1 text-sm">
-                  <input type="radio" name="type" value="income" checked={form.type === "income"} onChange={() => setForm({ ...form, type: "income", categoryId: "" })} /> 收入
+                  <input type="radio" name="type" value="income" checked={form.type === "income"} onChange={() => setForm({ ...form, type: "income", categoryId: "", annualProjectId: "" })} /> 收入
                 </label>
               </div>
               <input type="number" step="0.01" placeholder="金额" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className="w-full px-3 py-2 border rounded text-sm" required />
               <input type="text" placeholder="描述" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="w-full px-3 py-2 border rounded text-sm" required />
               <select value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })} className="w-full px-3 py-2 border rounded text-sm" required>
                 <option value="">选择分类</option>
-                {filteredCategories.map((c) => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+                {filteredCategories.map((c) => <option key={c.id} value={c.id}>{c.icon} {categoryLabel(c)}</option>)}
               </select>
               <select value={form.memberId} onChange={(e) => setForm({ ...form, memberId: e.target.value })} className="w-full px-3 py-2 border rounded text-sm" required>
                 {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
               <input type="date" value={form.transactionDate} onChange={(e) => setForm({ ...form, transactionDate: e.target.value })} className="w-full px-3 py-2 border rounded text-sm" required />
+              {form.type === "expense" && (
+                <select value={form.annualProjectId} onChange={(e) => setForm({ ...form, annualProjectId: e.target.value })} className="w-full px-3 py-2 border rounded text-sm">
+                  <option value="">年度专项（可选）</option>
+                  {annualProjects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
+              )}
               <input type="text" placeholder="备注（可选）" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} className="w-full px-3 py-2 border rounded text-sm" />
               <div className="flex gap-2 justify-end">
                 <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 border rounded text-sm">取消</button>
@@ -193,14 +255,15 @@ export function TransactionsPage() {
               <th className="text-left py-3 px-4">成员</th>
               <th className="text-right py-3 px-4">金额</th>
               <th className="text-left py-3 px-4">来源</th>
+              <th className="text-left py-3 px-4">年度专项</th>
               <th className="text-right py-3 px-4">操作</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} className="py-8 text-center text-muted-foreground">加载中...</td></tr>
+              <tr><td colSpan={9} className="py-8 text-center text-muted-foreground">加载中...</td></tr>
             ) : data.length === 0 ? (
-              <tr><td colSpan={8} className="py-8 text-center text-muted-foreground">暂无数据</td></tr>
+              <tr><td colSpan={9} className="py-8 text-center text-muted-foreground">暂无数据</td></tr>
             ) : (
               data.map((t) => (
                 <tr key={t.id} className="border-b last:border-0 hover:bg-muted/30">
@@ -210,13 +273,14 @@ export function TransactionsPage() {
                       {t.type === "expense" ? "支出" : "收入"}
                     </span>
                   </td>
-                  <td className="py-2 px-4">{t.category?.icon} {t.category?.name}</td>
+                  <td className="py-2 px-4">{t.category?.icon} {categoryLabel(t.category)}</td>
                   <td className="py-2 px-4">{t.description}</td>
                   <td className="py-2 px-4">{t.member?.name}</td>
                   <td className={`py-2 px-4 text-right font-medium ${t.type === "expense" ? "text-red-500" : "text-green-600"}`}>
                     {t.type === "expense" ? "-" : "+"}¥{t.amount.toFixed(2)}
                   </td>
                   <td className="py-2 px-4 text-muted-foreground">{sourceLabel(t.source)}</td>
+                  <td className="py-2 px-4 text-muted-foreground">{t.annualProject?.name || "-"}</td>
                   <td className="py-2 px-4 text-right">
                     <button onClick={() => handleEdit(t)} className="p-1 hover:text-primary"><Edit2 className="h-4 w-4" /></button>
                     <button onClick={() => handleDelete(t.id)} className="p-1 hover:text-destructive ml-1"><Trash2 className="h-4 w-4" /></button>

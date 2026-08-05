@@ -23,6 +23,7 @@ import { settingRoutes } from "./routes/settings.js";
 import { messageRoutes } from "./routes/messages.js";
 import { healthCheckupRoutes } from "./routes/health-checkups.js";
 import { medicalVisitRoutes } from "./routes/medical-visits.js";
+import { budgetRoutes } from "./routes/budgets.js";
 import { hubWebhookRoutes } from "./hub/webhook.js";
 import { hubOAuthRoutes } from "./hub/oauth.js";
 import { hubManifestRoutes } from "./hub/manifest.js";
@@ -269,6 +270,7 @@ function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_medical_visit_medications_visit ON medical_visit_medications(visit_id);
   `);
   migrateAssetsTable();
+  migratePlanningTables();
 }
 
 // 给已存在的 assets 表补齐新列、迁移旧的 type 取值。幂等、非破坏，
@@ -303,6 +305,108 @@ function migrateAssetsTable() {
     END
     WHERE allocation_bucket IS NULL OR allocation_bucket = '';
   `);
+}
+
+function addColumnIfMissing(table: string, column: string, ddl: string) {
+  const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!columns.some((item) => item.name === column)) sqlite.exec(ddl);
+}
+
+/** 家庭预算、保险理赔和微信专项确认：只增表/增列，兼容已有数据。 */
+function migratePlanningTables() {
+  const insuranceColumns: Array<[string, string]> = [
+    ["policyholder_member_id", "ALTER TABLE insurance_policies ADD COLUMN policyholder_member_id TEXT REFERENCES members(id)"],
+    ["policy_number", "ALTER TABLE insurance_policies ADD COLUMN policy_number TEXT"],
+    ["claim_phone", "ALTER TABLE insurance_policies ADD COLUMN claim_phone TEXT"],
+    ["claim_contact", "ALTER TABLE insurance_policies ADD COLUMN claim_contact TEXT"],
+    ["claim_contact_phone", "ALTER TABLE insurance_policies ADD COLUMN claim_contact_phone TEXT"],
+    ["claim_channels", "ALTER TABLE insurance_policies ADD COLUMN claim_channels TEXT"],
+    ["claim_steps", "ALTER TABLE insurance_policies ADD COLUMN claim_steps TEXT"],
+    ["claim_materials", "ALTER TABLE insurance_policies ADD COLUMN claim_materials TEXT"],
+    ["claim_notes", "ALTER TABLE insurance_policies ADD COLUMN claim_notes TEXT"],
+  ];
+  for (const [column, ddl] of insuranceColumns) addColumnIfMissing("insurance_policies", column, ddl);
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS insurance_attachments (
+      id TEXT PRIMARY KEY,
+      policy_id TEXT NOT NULL REFERENCES insurance_policies(id),
+      type TEXT NOT NULL DEFAULT 'other',
+      file_path TEXT NOT NULL,
+      original_file_name TEXT,
+      caption TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_insurance_attachments_policy ON insurance_attachments(policy_id);
+    CREATE TABLE IF NOT EXISTS annual_projects (
+      id TEXT PRIMARY KEY,
+      year INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      budget_amount REAL NOT NULL,
+      start_date TEXT,
+      end_date TEXT,
+      keywords TEXT,
+      note TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_annual_projects_year ON annual_projects(year);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_annual_projects_year_name ON annual_projects(year, name);
+    CREATE TABLE IF NOT EXISTS monthly_budgets (
+      id TEXT PRIMARY KEY,
+      month TEXT NOT NULL UNIQUE,
+      total_amount REAL NOT NULL,
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS monthly_budget_items (
+      id TEXT PRIMARY KEY,
+      budget_id TEXT NOT NULL REFERENCES monthly_budgets(id),
+      category_id TEXT NOT NULL REFERENCES categories(id),
+      amount REAL NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_monthly_budget_items_budget ON monthly_budget_items(budget_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_monthly_budget_items_budget_category ON monthly_budget_items(budget_id, category_id);
+    CREATE TABLE IF NOT EXISTS annual_budgets (
+      id TEXT PRIMARY KEY,
+      year INTEGER NOT NULL UNIQUE,
+      expected_income REAL NOT NULL DEFAULT 0,
+      regular_budget_amount REAL NOT NULL DEFAULT 0,
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS annual_budget_items (
+      id TEXT PRIMARY KEY,
+      budget_id TEXT NOT NULL REFERENCES annual_budgets(id),
+      category_id TEXT NOT NULL REFERENCES categories(id),
+      amount REAL NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_annual_budget_items_budget ON annual_budget_items(budget_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_annual_budget_items_budget_category ON annual_budget_items(budget_id, category_id);
+    CREATE TABLE IF NOT EXISTS pending_project_confirmations (
+      id TEXT PRIMARY KEY,
+      installation_id TEXT NOT NULL,
+      sender_id TEXT NOT NULL,
+      transaction_id TEXT NOT NULL REFERENCES transactions(id),
+      candidate_project_ids TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_pending_project_sender ON pending_project_confirmations(installation_id, sender_id);
+  `);
+  addColumnIfMissing(
+    "transactions",
+    "annual_project_id",
+    "ALTER TABLE transactions ADD COLUMN annual_project_id TEXT REFERENCES annual_projects(id)"
+  );
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_transactions_annual_project ON transactions(annual_project_id)");
 }
 
 async function start() {
@@ -356,6 +460,7 @@ async function start() {
   await app.register(messageRoutes, { prefix: "/api/v1/messages" });
   await app.register(healthCheckupRoutes, { prefix: "/api/v1/health/checkups" });
   await app.register(medicalVisitRoutes, { prefix: "/api/v1/health/visits" });
+  await app.register(budgetRoutes, { prefix: "/api/v1/budgets" });
 
   // Hub integration routes
   await app.register(hubWebhookRoutes, { prefix: "/hub" });

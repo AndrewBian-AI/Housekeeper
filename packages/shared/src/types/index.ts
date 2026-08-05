@@ -70,6 +70,7 @@ export interface Transaction {
   source: TransactionSource;
   aiRawInput: string | null;
   aiConfidence: number | null;
+  annualProjectId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -78,6 +79,7 @@ export interface TransactionWithRelations extends Transaction {
   category?: Category;
   account?: Account;
   member?: Member;
+  annualProject?: AnnualProject;
 }
 
 export interface Asset {
@@ -142,6 +144,8 @@ export interface InsurancePolicy {
   category: InsuranceCategory;
   /** 被保人成员 */
   insuredMemberId: string | null;
+  policyholderMemberId: string | null;
+  policyNumber: string | null;
   insurer: string | null;
   /** 保额 */
   coverageAmount: number | null;
@@ -152,10 +156,119 @@ export interface InsurancePolicy {
   cashValue: number | null;
   startDate: string | null;
   endDate: string | null;
+  claimPhone: string | null;
+  claimContact: string | null;
+  claimContactPhone: string | null;
+  claimChannels: string | null;
+  claimSteps: string | null;
+  claimMaterials: string | null;
+  claimNotes: string | null;
   note: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export type InsuranceAttachmentType =
+  | "policy"
+  | "terms"
+  | "payment"
+  | "claim_guide"
+  | "other";
+
+export interface InsuranceAttachment {
+  id: string;
+  policyId: string;
+  type: InsuranceAttachmentType;
+  filePath: string;
+  originalFileName: string | null;
+  caption: string | null;
+  createdAt: string;
+}
+
+export interface AnnualProject {
+  id: string;
+  year: number;
+  name: string;
+  budgetAmount: number;
+  startDate: string | null;
+  endDate: string | null;
+  keywords: string[];
+  note: string | null;
+  isActive: boolean;
+  actualAmount?: number;
+  remainingAmount?: number;
+  executionRate?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BudgetCategoryLine {
+  categoryId: string;
+  categoryName: string;
+  color: string | null;
+  budgetAmount: number;
+  actualAmount: number;
+  remainingAmount: number;
+  executionRate: number | null;
+  transactionCount: number;
+  status: "normal" | "warning" | "exceeded";
+}
+
+export interface BudgetOutsideLine {
+  categoryId: string;
+  categoryName: string;
+  color: string | null;
+  actualAmount: number;
+  transactionCount: number;
+}
+
+export interface MonthlyBudgetExecution {
+  month: string;
+  budgetId: string | null;
+  totalBudget: number;
+  allocatedBudget: number;
+  unallocatedBudget: number;
+  budgetedActual: number;
+  outsideBudgetActual: number;
+  specialProjectActual: number;
+  dailyActual: number;
+  allExpense: number;
+  remainingBudget: number;
+  executionRate: number | null;
+  elapsedRate: number;
+  warningCount: number;
+  note: string | null;
+  categoryLines: BudgetCategoryLine[];
+  outsideBudgetLines: BudgetOutsideLine[];
+  specialProjects: AnnualProject[];
+}
+
+export interface AnnualBudgetExecution {
+  year: number;
+  budgetId: string | null;
+  expectedIncome: number;
+  actualIncome: number;
+  regularBudget: number;
+  specialBudget: number;
+  totalBudget: number;
+  regularActual: number;
+  specialActual: number;
+  outsideBudgetActual: number;
+  totalActual: number;
+  projectedSurplus: number;
+  projectedSavingsRate: number | null;
+  actualSurplus: number;
+  elapsedRate: number;
+  note: string | null;
+  categoryLines: BudgetCategoryLine[];
+  outsideBudgetLines: BudgetOutsideLine[];
+  specialProjects: AnnualProject[];
+}
+
+export interface BudgetSnapshot {
+  monthly: MonthlyBudgetExecution | null;
+  annual: AnnualBudgetExecution | null;
 }
 
 export interface Setting {
@@ -379,6 +492,7 @@ export interface FinancialAnalysisSnapshot {
   topTransactions: FinancialAnalysisTopTransaction[];
   recurringCandidates: FinancialAnalysisRecurringCandidate[];
   assetSummary: AssetSummary[];
+  budgetSnapshot: BudgetSnapshot | null;
 }
 
 export interface FinancialAnalysisResponse {
@@ -407,6 +521,8 @@ export interface ParsedTransaction {
   description: string;
   category: string;
   transactionDate?: string;
+  /** AI 建议的年度专项名称，最终仍由后端校验或通过微信确认 */
+  annualProjectName?: string | null;
 }
 
 // ---- 健康管理：体检报告 ----

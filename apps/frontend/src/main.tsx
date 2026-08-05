@@ -16,6 +16,7 @@ import { AccountsPage } from "@/pages/AccountsPage";
 import { MembersPage } from "@/pages/MembersPage";
 import { MessagesPage } from "@/pages/MessagesPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { BudgetPage } from "@/pages/BudgetPage";
 import "./index.css";
 
 const router = createBrowserRouter([
@@ -27,6 +28,7 @@ const router = createBrowserRouter([
       { path: "analysis", element: <AIAnalysisPage /> },
       { path: "transactions", element: <TransactionsPage /> },
       { path: "assets", element: <AssetsPage /> },
+      { path: "budgets", element: <BudgetPage /> },
       { path: "checkups", element: <CheckupsPage /> },
       { path: "checkups/:id", element: <CheckupDetailPage /> },
       { path: "visits", element: <VisitsPage /> },

@@ -11,14 +11,16 @@ import {
   Brain,
   HeartPulse,
   Stethoscope,
+  PiggyBank,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "首页" },
   { to: "/analysis", icon: Brain, label: "AI分析" },
-  { to: "/transactions", icon: Receipt, label: "记账管理" },
   { to: "/assets", icon: Landmark, label: "资产管理" },
+  { to: "/budgets", icon: PiggyBank, label: "预算管理" },
+  { to: "/transactions", icon: Receipt, label: "记账管理" },
   { to: "/checkups", icon: HeartPulse, label: "体检报告" },
   { to: "/visits", icon: Stethoscope, label: "就诊记录" },
   { to: "/categories", icon: Tags, label: "分类管理" },
