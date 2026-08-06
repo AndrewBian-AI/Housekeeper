@@ -70,7 +70,11 @@ function loadPolicy(id: string) {
   return { ...policy, attachments };
 }
 
-function validateInsuranceBody(body: Record<string, unknown>): string | null {
+function validateInsuranceBody(
+  body: Record<string, unknown>,
+  allowArchivedInsuredId?: string | null,
+  allowArchivedPolicyholderId?: string | null
+): string | null {
   const frequencyError =
     body.premiumFrequency === undefined || body.premiumFrequency === null || body.premiumFrequency === ""
       ? null
@@ -86,8 +90,8 @@ function validateInsuranceBody(body: Record<string, unknown>): string | null {
   return firstError(
     validateRequiredName(body.name, "保单名称"),
     validateEnum(body.category, INSURANCE_CATEGORIES, "保险类别"),
-    validateMember(body.insuredMemberId, "被保险成员"),
-    validateMember(body.policyholderMemberId, "投保成员"),
+    validateMember(body.insuredMemberId, "被保险成员", allowArchivedInsuredId),
+    validateMember(body.policyholderMemberId, "投保成员", allowArchivedPolicyholderId),
     validateNonNegative(body.coverageAmount, "保额"),
     validateNonNegative(body.premium, "保费"),
     validateNonNegative(body.cashValue, "现金价值"),
@@ -165,7 +169,11 @@ export async function insuranceRoutes(app: FastifyInstance) {
       ...request.body,
       name: typeof request.body.name === "string" ? request.body.name.trim() : existing.name,
     };
-    const error = validateInsuranceBody(merged);
+    const error = validateInsuranceBody(
+      merged,
+      existing.insuredMemberId,
+      existing.policyholderMemberId
+    );
     if (error) return reply.status(400).send({ error });
 
     const allowed = [

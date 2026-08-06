@@ -4,6 +4,7 @@ import { api } from "@/api/client";
 import type { HealthCheckup, Member } from "@caiwu/shared";
 import { CHECKUP_STATUS } from "./shared";
 import { Upload, Trash2, FileText, Eye } from "lucide-react";
+import { memberOptionLabel, selectableMembers } from "@/lib/member-options";
 
 type CheckupRow = HealthCheckup & { memberName?: string | null };
 
@@ -65,7 +66,7 @@ export function CheckupsPage() {
           <option value="">全部成员</option>
           {members.map((m) => (
             <option key={m.id} value={m.id}>
-              {m.name}
+              {memberOptionLabel(m)}
             </option>
           ))}
         </select>
@@ -165,7 +166,8 @@ function UploadModal({
   onClose: () => void;
   onDone: (id: string) => void;
 }) {
-  const [memberId, setMemberId] = useState(members[0]?.id || "");
+  const activeMembers = selectableMembers(members);
+  const [memberId, setMemberId] = useState(activeMembers[0]?.id || "");
   const [checkupDate, setCheckupDate] = useState("");
   const [institution, setInstitution] = useState("");
   const [note, setNote] = useState("");
@@ -208,9 +210,9 @@ function UploadModal({
               className="mt-1 w-full px-3 py-2 border rounded-md text-sm"
             >
               <option value="">请选择</option>
-              {members.map((m) => (
+              {activeMembers.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.name}
+                  {memberOptionLabel(m)}
                 </option>
               ))}
             </select>

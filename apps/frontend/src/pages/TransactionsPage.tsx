@@ -4,6 +4,7 @@ import { api } from "@/api/client";
 import type { TransactionWithRelations, PaginatedResponse, Category, Member, AnnualProject } from "@caiwu/shared";
 import { Plus, Trash2, Edit2 } from "lucide-react";
 import { getBusinessToday } from "@/lib/date";
+import { memberOptionLabel, selectableMembers } from "@/lib/member-options";
 
 const SOURCE_LABELS: Record<string, string> = {
   "wechat": "微信文字",
@@ -81,7 +82,8 @@ export function TransactionsPage() {
     ]);
     setCategories(cats);
     setMembers(mems);
-    if (mems.length > 0) setForm((f) => ({ ...f, memberId: mems[0].id }));
+    const firstActiveMember = mems.find((member) => member.isActive);
+    if (firstActiveMember) setForm((f) => ({ ...f, memberId: firstActiveMember.id }));
   };
 
   const loadData = async () => {
@@ -115,7 +117,7 @@ export function TransactionsPage() {
       }
       setShowForm(false);
       setEditingId(null);
-      setForm({ type: "expense", amount: "", description: "", categoryId: "", memberId: members[0]?.id || "", transactionDate: getBusinessToday(), note: "", annualProjectId: "" });
+      setForm({ type: "expense", amount: "", description: "", categoryId: "", memberId: members.find((member) => member.isActive)?.id || "", transactionDate: getBusinessToday(), note: "", annualProjectId: "" });
       loadData();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "保存失败");
@@ -149,6 +151,7 @@ export function TransactionsPage() {
       (!form.type || c.type === form.type) &&
       (c.isActive || (Boolean(editingId) && c.id === form.categoryId))
   );
+  const formMembers = selectableMembers(members, editingId ? form.memberId : null);
 
   return (
     <div className="space-y-4">
@@ -164,7 +167,7 @@ export function TransactionsPage() {
               amount: "",
               description: "",
               categoryId: "",
-              memberId: members[0]?.id || "",
+              memberId: members.find((member) => member.isActive)?.id || "",
               transactionDate: getBusinessToday(),
               note: "",
               annualProjectId: "",
@@ -185,7 +188,7 @@ export function TransactionsPage() {
         </select>
         <select value={filters.memberId} onChange={(e) => setFilters({ ...filters, memberId: e.target.value })} className="w-full rounded border px-2 py-2 text-sm sm:w-auto">
           <option value="">全部成员</option>
-          {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          {members.map((m) => <option key={m.id} value={m.id}>{memberOptionLabel(m)}</option>)}
         </select>
         <select value={filters.categoryId} onChange={(e) => setFilters({ ...filters, categoryId: e.target.value })} className="w-full rounded border px-2 py-2 text-sm sm:w-auto">
           <option value="">全部分类</option>
@@ -223,7 +226,7 @@ export function TransactionsPage() {
                 {filteredCategories.map((c) => <option key={c.id} value={c.id}>{c.icon} {categoryLabel(c)}</option>)}
               </select>
               <select value={form.memberId} onChange={(e) => setForm({ ...form, memberId: e.target.value })} className="w-full px-3 py-2 border rounded text-sm" required>
-                {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                {formMembers.map((m) => <option key={m.id} value={m.id}>{memberOptionLabel(m)}</option>)}
               </select>
               <input type="date" value={form.transactionDate} onChange={(e) => setForm({ ...form, transactionDate: e.target.value })} className="w-full px-3 py-2 border rounded text-sm" required />
               {form.type === "expense" && (

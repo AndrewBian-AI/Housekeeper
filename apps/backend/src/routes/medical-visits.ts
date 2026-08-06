@@ -142,6 +142,7 @@ export async function medicalVisitRoutes(app: FastifyInstance) {
       if (!b.memberId) return reply.status(400).send({ error: "memberId 必填" });
       const member = db.select().from(members).where(eq(members.id, b.memberId as string)).get();
       if (!member) return reply.status(400).send({ error: "成员不存在" });
+      if (!member.isActive) return reply.status(400).send({ error: "已归档成员不能新增就诊记录" });
 
       const id = nanoid();
       db.insert(medicalVisits)
@@ -174,6 +175,12 @@ export async function medicalVisitRoutes(app: FastifyInstance) {
       const { id } = request.params;
       const existing = db.select().from(medicalVisits).where(eq(medicalVisits.id, id)).get();
       if (!existing) return reply.status(404).send({ error: "Not found" });
+      if (request.body.memberId !== undefined && request.body.memberId !== existing.memberId) {
+        const member = db.select().from(members).where(eq(members.id, request.body.memberId as string)).get();
+        if (!member || !member.isActive) {
+          return reply.status(400).send({ error: "请选择生效中的家庭成员" });
+        }
+      }
       const allowed = [
         "memberId",
         "visitDate",

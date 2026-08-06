@@ -4,6 +4,7 @@ import type { InsurancePolicy, InsuranceCategory, AssetFrequency, Member, Insura
 import { INSURANCE_CATEGORY_LABELS } from "@caiwu/shared";
 import { Plus, Edit2, Archive, RotateCcw, Eye, FileText, Upload, Trash2 } from "lucide-react";
 import { formatCurrency } from "./helpers";
+import { memberOptionLabel, selectableMembers } from "@/lib/member-options";
 
 const CATEGORIES = Object.keys(INSURANCE_CATEGORY_LABELS) as InsuranceCategory[];
 const FREQ_LABELS: Record<AssetFrequency, string> = {
@@ -173,6 +174,11 @@ export function InsuranceTab({ onChanged }: { onChanged?: () => void }) {
 
   const visibleItems = items.filter((item) => showArchived || item.isActive);
   const archivedCount = items.filter((item) => !item.isActive).length;
+  const formMembers = selectableMembers(
+    members,
+    editingId ? form.insuredMemberId : null,
+    editingId ? form.policyholderMemberId : null
+  );
 
   const openDetail = async (id: string) => {
     setDetail(await api.get<PolicyDetail>(`/insurance/${id}`));
@@ -326,9 +332,9 @@ export function InsuranceTab({ onChanged }: { onChanged?: () => void }) {
                 </select>
                 <select value={form.insuredMemberId} onChange={(e) => setForm({ ...form, insuredMemberId: e.target.value })} className="flex-1 rounded border px-3 py-2 text-sm">
                   <option value="">被保人（可选）</option>
-                  {members.map((m) => (
+                  {formMembers.map((m) => (
                     <option key={m.id} value={m.id}>
-                      {m.name}
+                      {memberOptionLabel(m)}
                     </option>
                   ))}
                 </select>
@@ -336,7 +342,7 @@ export function InsuranceTab({ onChanged }: { onChanged?: () => void }) {
               <div className="flex gap-2">
                 <select value={form.policyholderMemberId} onChange={(e) => setForm({ ...form, policyholderMemberId: e.target.value })} className="flex-1 rounded border px-3 py-2 text-sm">
                   <option value="">投保人（可选）</option>
-                  {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  {formMembers.map((m) => <option key={m.id} value={m.id}>{memberOptionLabel(m)}</option>)}
                 </select>
                 <input type="text" placeholder="保单号（可选）" value={form.policyNumber} onChange={(e) => setForm({ ...form, policyNumber: e.target.value })} className="flex-1 rounded border px-3 py-2 text-sm" />
               </div>

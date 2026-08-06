@@ -9,6 +9,7 @@ import {
 import { Plus, Trash2, Edit2, LineChart, Archive, RotateCcw } from "lucide-react";
 import { formatCurrency } from "./helpers";
 import { getBusinessToday } from "@/lib/date";
+import { memberOptionLabel, selectableMembers } from "@/lib/member-options";
 
 const ASSET_TYPES = Object.keys(ASSET_TYPE_LABELS) as AssetType[];
 const BUCKETS = Object.keys(ALLOCATION_BUCKET_LABELS) as AllocationBucket[];
@@ -116,6 +117,7 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
 
   const visibleAssets = assets.filter((asset) => showArchived || asset.isActive);
   const archivedCount = assets.filter((asset) => !asset.isActive).length;
+  const formMembers = selectableMembers(members, editingId ? form.memberId : null);
 
   return (
     <div className="space-y-4">
@@ -295,9 +297,9 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
                 className="w-full rounded border px-3 py-2 text-sm"
               >
                 <option value="">家庭共有</option>
-                {members.map((m) => (
+                {formMembers.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.name}
+                    {memberOptionLabel(m)}
                   </option>
                 ))}
               </select>

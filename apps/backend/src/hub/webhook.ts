@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { db } from "../db/connection.js";
-import { installations, messageLog } from "../db/schema.js";
+import { installations, members, messageLog } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { verifyWebhookSignature } from "./signature.js";
@@ -231,6 +231,22 @@ async function processMessage(event: NormalizedWebhookEvent, logId: string, inst
   const senderId = event.senderId;
   if (!senderId) return;
 
+  // 已归档的微信身份在调用图片/文本模型前直接拦截，避免继续记账和产生 AI 费用。
+  const boundMember = db.select().from(members).where(eq(members.wechatUserId, senderId)).get();
+  if (boundMember && !boundMember.isActive) {
+    await sendBotMessage(
+      installationId,
+      senderId,
+      "该微信绑定的家庭成员已归档，请先在后台恢复该成员或重新绑定微信",
+      event.traceId
+    );
+    db.update(messageLog)
+      .set({ status: "parsed", parsedResult: JSON.stringify({ note: "archived member" }) })
+      .where(eq(messageLog.id, logId))
+      .run();
+    return;
+  }
+
   if (event.messageType === "image") {
     await processImageMessage(event, logId, installationId, senderId);
     return;
@@ -422,6 +438,10 @@ async function handleCommand(command: string, senderId: string, installationId: 
       await sendBotMessage(installationId, senderId, "暂无记录", traceId);
       return;
     }
+    if (!member.isActive) {
+      await sendBotMessage(installationId, senderId, "该微信绑定的家庭成员已归档，请先在后台恢复", traceId);
+      return;
+    }
 
     const recent = db
       .select()
@@ -452,6 +472,10 @@ async function handleCommand(command: string, senderId: string, installationId: 
     const member = db.select().from(memTable).where(eq(memTable.wechatUserId, senderId)).get();
     if (!member) {
       await sendBotMessage(installationId, senderId, "暂无记录", traceId);
+      return;
+    }
+    if (!member.isActive) {
+      await sendBotMessage(installationId, senderId, "该微信绑定的家庭成员已归档，请先在后台恢复", traceId);
       return;
     }
 

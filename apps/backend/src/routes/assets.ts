@@ -29,14 +29,14 @@ interface AssetBody {
   note?: string;
 }
 
-function validateAssetBody(body: Record<string, unknown>): string | null {
+function validateAssetBody(body: Record<string, unknown>, allowArchivedMemberId?: string | null): string | null {
   return firstError(
     validateRequiredName(body.name, "资产名称"),
     validateEnum(body.type, ASSET_TYPES, "资产类型"),
     validateEnum(body.allocationBucket, ALLOCATION_BUCKETS, "配置类别"),
     validateNonNegative(body.amount, "当前价值", true),
     validateNonNegative(body.costBasis, "成本金额"),
-    validateMember(body.memberId)
+    validateMember(body.memberId, "所属成员", allowArchivedMemberId)
   );
 }
 
@@ -161,7 +161,7 @@ export async function assetRoutes(app: FastifyInstance) {
       ...request.body,
       name: typeof request.body.name === "string" ? request.body.name.trim() : existing.name,
     };
-    const error = validateAssetBody(merged);
+    const error = validateAssetBody(merged, existing.memberId);
     if (error) return reply.status(400).send({ error });
 
     const allowed = [

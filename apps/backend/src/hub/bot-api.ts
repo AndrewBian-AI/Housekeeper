@@ -80,7 +80,7 @@ export async function sendBotMessageToAll(text: string) {
 
   let successCount = 0;
   for (const member of allMembers) {
-    if (member.wechatUserId) {
+    if (member.isActive && member.wechatUserId) {
       const success = await sendMessageViaApi(
         installation.appToken,
         member.wechatUserId,

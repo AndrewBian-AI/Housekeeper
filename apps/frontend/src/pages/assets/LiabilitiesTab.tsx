@@ -4,6 +4,7 @@ import type { Liability, LiabilityType, Asset, Member } from "@caiwu/shared";
 import { LIABILITY_TYPE_LABELS } from "@caiwu/shared";
 import { Plus, Edit2, Archive, RotateCcw } from "lucide-react";
 import { formatCurrency, formatPercent } from "./helpers";
+import { memberOptionLabel, selectableMembers } from "@/lib/member-options";
 
 const TYPES = Object.keys(LIABILITY_TYPE_LABELS) as LiabilityType[];
 
@@ -124,6 +125,7 @@ export function LiabilitiesTab({ onChanged }: { onChanged?: () => void }) {
 
   const visibleItems = items.filter((item) => showArchived || item.isActive);
   const archivedCount = items.filter((item) => !item.isActive).length;
+  const formMembers = selectableMembers(members, editingId ? form.memberId : null);
 
   return (
     <div className="space-y-4">
@@ -245,9 +247,9 @@ export function LiabilitiesTab({ onChanged }: { onChanged?: () => void }) {
               </select>
               <select value={form.memberId} onChange={(e) => setForm({ ...form, memberId: e.target.value })} className="w-full rounded border px-3 py-2 text-sm">
                 <option value="">家庭共有</option>
-                {members.map((m) => (
+                {formMembers.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.name}
+                    {memberOptionLabel(m)}
                   </option>
                 ))}
               </select>

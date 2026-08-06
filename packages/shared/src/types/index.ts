@@ -32,8 +32,24 @@ export interface Member {
   name: string;
   avatarUrl: string | null;
   role: MemberRole;
+  isActive: boolean;
+  mergedIntoMemberId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MemberUsageSummary {
+  transactions: number;
+  assets: number;
+  liabilities: number;
+  policies: number;
+  checkups: number;
+  visits: number;
+}
+
+export interface MemberWithUsage extends Member {
+  mergedIntoMemberName: string | null;
+  usage: MemberUsageSummary;
 }
 
 export interface Category {

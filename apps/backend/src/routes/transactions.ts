@@ -114,6 +114,10 @@ export async function transactionRoutes(app: FastifyInstance) {
     };
   }>("/", async (request, reply) => {
     const body = request.body;
+    const member = db.select().from(members).where(eq(members.id, body.memberId)).get();
+    if (!member || !member.isActive) {
+      return reply.status(400).send({ error: "请选择生效中的家庭成员" });
+    }
     const category = db.select().from(categories).where(eq(categories.id, body.categoryId)).get();
     if (!category || !category.isActive || category.type !== body.type) {
       return reply.status(400).send({ error: "请选择当前启用且与收支类型一致的分类" });
@@ -165,6 +169,12 @@ export async function transactionRoutes(app: FastifyInstance) {
       }
       const mergedType = String(request.body.type ?? existing.type);
       const mergedDate = String(request.body.transactionDate ?? existing.transactionDate);
+      const mergedMemberId = String(request.body.memberId ?? existing.memberId);
+      const member = db.select().from(members).where(eq(members.id, mergedMemberId)).get();
+      if (!member) return reply.status(400).send({ error: "所选成员不存在" });
+      if (!member.isActive && mergedMemberId !== existing.memberId) {
+        return reply.status(400).send({ error: "已归档成员不能用于新的记账归属" });
+      }
       const mergedCategoryId = String(request.body.categoryId ?? existing.categoryId);
       const category = db.select().from(categories).where(eq(categories.id, mergedCategoryId)).get();
       if (!category || category.type !== mergedType) {

@@ -6,6 +6,8 @@ export const members = sqliteTable("members", {
   name: text("name").notNull(),
   avatarUrl: text("avatar_url"),
   role: text("role").notNull().default("member"),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  mergedIntoMemberId: text("merged_into_member_id"),
   createdAt: text("created_at").notNull().default("(datetime('now'))"),
   updatedAt: text("updated_at").notNull().default("(datetime('now'))"),
 });

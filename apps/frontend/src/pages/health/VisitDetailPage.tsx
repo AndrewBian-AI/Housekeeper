@@ -4,6 +4,7 @@ import { api } from "@/api/client";
 import type { MedicalVisitWithRelations, Member, ParsedVisitImage } from "@caiwu/shared";
 import { ATTACHMENT_TYPE, ATTACHMENT_TYPE_OPTIONS } from "./shared";
 import { ArrowLeft, Save, Trash2, Upload, Plus, Sparkles, Download } from "lucide-react";
+import { memberOptionLabel, selectableMembers } from "@/lib/member-options";
 
 interface MedRow {
   drugName: string;
@@ -122,6 +123,7 @@ export function VisitDetailPage() {
   }
 
   const memberName = members.find((m) => m.id === data.memberId)?.name;
+  const formMembers = selectableMembers(members, data.memberId);
 
   return (
     <div className="space-y-4">
@@ -166,7 +168,7 @@ export function VisitDetailPage() {
           view={memberName || "-"}
           edit={
             <select value={form.memberId} onChange={(e) => set("memberId", e.target.value)} className="w-full px-2 py-1 border rounded text-sm">
-              {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              {formMembers.map((m) => <option key={m.id} value={m.id}>{memberOptionLabel(m)}</option>)}
             </select>
           }
         />

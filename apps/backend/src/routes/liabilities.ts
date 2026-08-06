@@ -26,7 +26,7 @@ interface LiabilityBody {
   note?: string;
 }
 
-function validateLiabilityBody(body: Record<string, unknown>): string | null {
+function validateLiabilityBody(body: Record<string, unknown>, allowArchivedMemberId?: string | null): string | null {
   const originalError =
     typeof body.originalAmount === "number" &&
     typeof body.balance === "number" &&
@@ -46,7 +46,7 @@ function validateLiabilityBody(body: Record<string, unknown>): string | null {
     validateNonNegative(body.monthlyPayment, "月供"),
     originalError,
     interestError,
-    validateMember(body.memberId),
+    validateMember(body.memberId, "所属成员", allowArchivedMemberId),
     validateLinkedAsset(body.linkedAssetId)
   );
 }
@@ -107,7 +107,7 @@ export async function liabilityRoutes(app: FastifyInstance) {
       ...request.body,
       name: typeof request.body.name === "string" ? request.body.name.trim() : existing.name,
     };
-    const error = validateLiabilityBody(merged);
+    const error = validateLiabilityBody(merged, existing.memberId);
     if (error) return reply.status(400).send({ error });
 
     const allowed = [

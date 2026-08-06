@@ -24,10 +24,17 @@ export function validateNonNegative(value: unknown, label: string, required = fa
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? null : `${label}必须是大于或等于0的数字`;
 }
 
-export function validateMember(memberId: unknown, label = "所属成员"): string | null {
+export function validateMember(
+  memberId: unknown,
+  label = "所属成员",
+  allowArchivedMemberId?: string | null
+): string | null {
   if (memberId === undefined || memberId === null || memberId === "") return null;
   if (typeof memberId !== "string") return `${label}无效`;
-  return db.select({ id: members.id }).from(members).where(eq(members.id, memberId)).get() ? null : `${label}不存在`;
+  const member = db.select().from(members).where(eq(members.id, memberId)).get();
+  if (!member) return `${label}不存在`;
+  if (!member.isActive && memberId !== allowArchivedMemberId) return `${label}已归档`;
+  return null;
 }
 
 export function validateLinkedAsset(assetId: unknown): string | null {

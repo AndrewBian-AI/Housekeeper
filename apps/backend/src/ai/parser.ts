@@ -111,6 +111,12 @@ export function finalizeAndSave(
 
     // Find or create member
     let member = db.select().from(members).where(eq(members.wechatUserId, senderId)).get();
+    if (member && !member.isActive) {
+      return {
+        success: false,
+        replyMessage: "该微信绑定的家庭成员已归档，请先在后台恢复该成员或重新绑定微信",
+      };
+    }
     if (!member) {
       const memberId = nanoid();
       db.insert(members)
@@ -119,6 +125,8 @@ export function finalizeAndSave(
           wechatUserId: senderId,
           name: `微信用户_${senderId.slice(-4)}`,
           role: "member",
+          isActive: true,
+          mergedIntoMemberId: null,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         })

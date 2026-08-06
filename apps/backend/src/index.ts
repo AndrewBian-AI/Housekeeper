@@ -57,6 +57,8 @@ function initDatabase() {
       name TEXT NOT NULL,
       avatar_url TEXT,
       role TEXT NOT NULL DEFAULT 'member',
+      is_active INTEGER NOT NULL DEFAULT 1,
+      merged_into_member_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -269,8 +271,25 @@ function initDatabase() {
     );
     CREATE INDEX IF NOT EXISTS idx_medical_visit_medications_visit ON medical_visit_medications(visit_id);
   `);
+  migrateMembersTable();
   migrateAssetsTable();
   migratePlanningTables();
+}
+
+/** 成员身份治理：只增加归档与合并追踪字段，不改写现有成员或业务数据。 */
+function migrateMembersTable() {
+  addColumnIfMissing(
+    "members",
+    "is_active",
+    "ALTER TABLE members ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1"
+  );
+  addColumnIfMissing(
+    "members",
+    "merged_into_member_id",
+    "ALTER TABLE members ADD COLUMN merged_into_member_id TEXT"
+  );
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_members_active ON members(is_active)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_members_merged_into ON members(merged_into_member_id)");
 }
 
 // 给已存在的 assets 表补齐新列、迁移旧的 type 取值。幂等、非破坏，

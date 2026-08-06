@@ -4,6 +4,7 @@ import { api } from "@/api/client";
 import type { HealthCheckupWithItems, Member } from "@caiwu/shared";
 import { CHECKUP_STATUS, ITEM_FLAG } from "./shared";
 import { ArrowLeft, RefreshCw, Save, AlertTriangle, Download } from "lucide-react";
+import { memberOptionLabel, selectableMembers } from "@/lib/member-options";
 
 export function CheckupDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -88,6 +89,7 @@ export function CheckupDetailPage() {
   const nameMismatch =
     data.parsedName && memberName && !data.parsedName.includes(memberName) && !memberName.includes(data.parsedName);
   const st = CHECKUP_STATUS[data.status] ?? CHECKUP_STATUS.pending;
+  const formMembers = selectableMembers(members, data.memberId);
 
   return (
     <div className="space-y-4">
@@ -140,8 +142,8 @@ export function CheckupDetailPage() {
         <Field label="成员">
           {editing ? (
             <select value={form.memberId} onChange={(e) => setForm({ ...form, memberId: e.target.value })} className="w-full px-2 py-1 border rounded text-sm">
-              {members.map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
+              {formMembers.map((m) => (
+                <option key={m.id} value={m.id}>{memberOptionLabel(m)}</option>
               ))}
             </select>
           ) : (
