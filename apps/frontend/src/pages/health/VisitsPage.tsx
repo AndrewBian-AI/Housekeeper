@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "@/api/client";
 import type { MedicalVisit, Member } from "@caiwu/shared";
 import { Plus, Trash2, Eye, Paperclip, Pill } from "lucide-react";
+import { memberOptionLabel, selectableMembers } from "@/lib/member-options";
 
 type VisitRow = MedicalVisit & {
   memberName?: string | null;
@@ -68,7 +69,7 @@ export function VisitsPage() {
           <option value="">全部成员</option>
           {members.map((m) => (
             <option key={m.id} value={m.id}>
-              {m.name}
+              {memberOptionLabel(m)}
             </option>
           ))}
         </select>
@@ -163,8 +164,9 @@ function CreateModal({
   onClose: () => void;
   onDone: (id: string) => void;
 }) {
+  const activeMembers = selectableMembers(members);
   const [form, setForm] = useState({
-    memberId: members[0]?.id || "",
+    memberId: activeMembers[0]?.id || "",
     visitDate: new Date().toISOString().slice(0, 10),
     hospital: "",
     department: "",
@@ -206,8 +208,8 @@ function CreateModal({
             <label className="text-sm text-muted-foreground">成员 *</label>
             <select value={form.memberId} onChange={(e) => set("memberId", e.target.value)} className="mt-1 w-full px-3 py-2 border rounded-md text-sm">
               <option value="">请选择</option>
-              {members.map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
+              {activeMembers.map((m) => (
+                <option key={m.id} value={m.id}>{memberOptionLabel(m)}</option>
               ))}
             </select>
           </div>

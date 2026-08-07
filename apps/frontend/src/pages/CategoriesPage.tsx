@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { api } from "@/api/client";
 import type { Category } from "@caiwu/shared";
-import { Plus, Trash2, Edit2 } from "lucide-react";
+import { Plus, Edit2, Archive, RotateCcw } from "lucide-react";
 
 const TYPE_LABELS: Record<string, string> = { expense: "支出", income: "收入" };
 
@@ -42,20 +42,18 @@ export function CategoriesPage() {
     setShowForm(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("确定删除该分类吗？")) return;
-    await api.delete(`/categories/${id}`);
-    loadData();
-  };
-
   const toggleActive = async (c: Category) => {
+    if (c.isActive && !confirm(`确定归档“${c.name}”分类吗？历史记账和预算不会受影响。`)) return;
     await api.put(`/categories/${c.id}`, { isActive: !c.isActive });
     loadData();
   };
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-xl font-bold">分类管理</h2>
+        <div>
+          <h2 className="text-xl font-bold">分类管理</h2>
+          <p className="mt-1 text-sm text-muted-foreground">分类归档后不再用于新记账，但历史记录和预算关联会继续保留。</p>
+        </div>
         <button onClick={() => { setShowForm(true); setEditingId(null); setForm({ name: "", type: "expense", icon: "", color: "#3b82f6" }); }}
           className="flex items-center gap-1 px-3 py-2 bg-primary text-primary-foreground rounded-md text-sm">
           <Plus className="h-4 w-4" /> 新增分类
@@ -75,10 +73,11 @@ export function CategoriesPage() {
             <h3 className="font-bold mb-4">{editingId ? "编辑分类" : "新增分类"}</h3>
             <form onSubmit={handleSubmit} className="space-y-3">
               <input type="text" placeholder="分类名称" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 border rounded text-sm" required />
-              <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="w-full px-3 py-2 border rounded text-sm">
+              <select disabled={Boolean(editingId)} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="w-full px-3 py-2 border rounded text-sm disabled:bg-muted">
                 <option value="expense">支出</option>
                 <option value="income">收入</option>
               </select>
+              {editingId && <p className="text-xs text-muted-foreground">已有分类不能改变收支类型。修改名称会同步更新历史记录中的显示名称。</p>}
               <input type="text" placeholder="图标（emoji）" value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} className="w-full px-3 py-2 border rounded text-sm" />
               <div className="flex items-center gap-2">
                 <label className="text-sm">颜色</label>
@@ -111,17 +110,25 @@ export function CategoriesPage() {
             ) : categories.map((c) => (
               <tr key={c.id} className="border-b last:border-0 hover:bg-muted/30">
                 <td className="py-2 px-4 text-lg">{c.icon || "-"}</td>
-                <td className="py-2 px-4 font-medium">{c.name}</td>
+                <td className="py-2 px-4 font-medium">{c.name}{!c.isActive && <span className="ml-2 text-xs font-normal text-muted-foreground">（已归档）</span>}</td>
                 <td className="py-2 px-4"><span className={`px-2 py-0.5 rounded text-xs ${c.type === "expense" ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>{TYPE_LABELS[c.type]}</span></td>
                 <td className="py-2 px-4">{c.color ? <span className="inline-block w-5 h-5 rounded" style={{ backgroundColor: c.color }} /> : "-"}</td>
                 <td className="py-2 px-4">
-                  <button onClick={() => toggleActive(c)} className={`px-2 py-0.5 rounded text-xs ${c.isActive ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
-                    {c.isActive ? "启用" : "禁用"}
-                  </button>
+                  <span className={`inline-flex rounded px-2 py-0.5 text-xs ${c.isActive ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}`}>
+                    {c.isActive ? "生效中" : "已归档"}
+                  </span>
                 </td>
                 <td className="py-2 px-4 text-right">
-                  <button onClick={() => handleEdit(c)} className="p-1 hover:text-primary"><Edit2 className="h-4 w-4" /></button>
-                  <button onClick={() => handleDelete(c.id)} className="p-1 hover:text-destructive ml-1"><Trash2 className="h-4 w-4" /></button>
+                  <div className="inline-flex items-center gap-1">
+                    <button onClick={() => handleEdit(c)} title="编辑" className="p-1 hover:text-primary"><Edit2 className="h-4 w-4" /></button>
+                    <button
+                      onClick={() => toggleActive(c)}
+                      title={c.isActive ? "归档" : "恢复"}
+                      className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-muted"
+                    >
+                      {c.isActive ? <><Archive className="h-3.5 w-3.5" /> 归档</> : <><RotateCcw className="h-3.5 w-3.5" /> 恢复</>}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

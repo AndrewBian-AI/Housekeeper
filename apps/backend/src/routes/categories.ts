@@ -53,8 +53,8 @@ export async function categoryRoutes(app: FastifyInstance) {
     const { id } = request.params;
     const existing = db.select().from(categories).where(eq(categories.id, id)).get();
     if (!existing) return reply.status(404).send({ error: "Not found" });
-    db.delete(categories).where(eq(categories.id, id)).run();
-    return { success: true };
+    db.update(categories).set({ isActive: false }).where(eq(categories.id, id)).run();
+    return { success: true, archived: true };
   });
 
   app.put<{ Body: { items: { id: string; sortOrder: number }[] } }>(

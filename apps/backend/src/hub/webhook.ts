@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { db } from "../db/connection.js";
-import { installations, messageLog } from "../db/schema.js";
+import { installations, members, messageLog } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { verifyWebhookSignature } from "./signature.js";
@@ -9,6 +9,11 @@ import { parseImageTransaction } from "../ai/dashscope.js";
 import { downloadMediaAsDataUrl } from "./media.js";
 import { sendBotMessage } from "./bot-api.js";
 import { getMonthDateRange } from "../utils/date.js";
+import { getWechatHelpMessage } from "./help-message.js";
+import {
+  createProjectConfirmation,
+  handleProjectConfirmationReply,
+} from "./project-confirmation.js";
 
 interface LegacyHubEvent {
   type?: string;
@@ -226,6 +231,22 @@ async function processMessage(event: NormalizedWebhookEvent, logId: string, inst
   const senderId = event.senderId;
   if (!senderId) return;
 
+  // 已归档的微信身份在调用图片/文本模型前直接拦截，避免继续记账和产生 AI 费用。
+  const boundMember = db.select().from(members).where(eq(members.wechatUserId, senderId)).get();
+  if (boundMember && !boundMember.isActive) {
+    await sendBotMessage(
+      installationId,
+      senderId,
+      "该微信绑定的家庭成员已归档，请先在后台恢复该成员或重新绑定微信",
+      event.traceId
+    );
+    db.update(messageLog)
+      .set({ status: "parsed", parsedResult: JSON.stringify({ note: "archived member" }) })
+      .where(eq(messageLog.id, logId))
+      .run();
+    return;
+  }
+
   if (event.messageType === "image") {
     await processImageMessage(event, logId, installationId, senderId);
     return;
@@ -262,6 +283,23 @@ async function processMessage(event: NormalizedWebhookEvent, logId: string, inst
     return;
   }
 
+  const confirmationReply = handleProjectConfirmationReply(
+    installationId,
+    senderId,
+    textContent
+  );
+  if (confirmationReply) {
+    await sendBotMessage(installationId, senderId, confirmationReply, event.traceId);
+    db.update(messageLog)
+      .set({
+        status: "saved",
+        parsedResult: JSON.stringify({ projectConfirmation: textContent }),
+      })
+      .where(eq(messageLog.id, logId))
+      .run();
+    return;
+  }
+
   try {
     const source = event.messageType === "voice" ? "wechat-voice" : "wechat";
     const result = await parseAndSaveMessage(textContent, senderId, source);
@@ -274,7 +312,23 @@ async function processMessage(event: NormalizedWebhookEvent, logId: string, inst
       .where(eq(messageLog.id, logId))
       .run();
 
-    await sendBotMessage(installationId, senderId, result.replyMessage, event.traceId);
+    const confirmationPrompt =
+      result.transactionId && result.pendingProjectIds?.length
+        ? createProjectConfirmation(
+            installationId,
+            senderId,
+            result.transactionId,
+            result.pendingProjectIds
+          )
+        : null;
+    await sendBotMessage(
+      installationId,
+      senderId,
+      confirmationPrompt
+        ? `${result.replyMessage}\n\n${confirmationPrompt}`
+        : result.replyMessage,
+      event.traceId
+    );
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : "Unknown error";
     db.update(messageLog)
@@ -336,7 +390,23 @@ async function processImageMessage(
       .where(eq(messageLog.id, logId))
       .run();
 
-    await sendBotMessage(installationId, senderId, result.replyMessage, event.traceId);
+    const confirmationPrompt =
+      result.transactionId && result.pendingProjectIds?.length
+        ? createProjectConfirmation(
+            installationId,
+            senderId,
+            result.transactionId,
+            result.pendingProjectIds
+          )
+        : null;
+    await sendBotMessage(
+      installationId,
+      senderId,
+      confirmationPrompt
+        ? `${result.replyMessage}\n\n${confirmationPrompt}`
+        : result.replyMessage,
+      event.traceId
+    );
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : "Unknown error";
     console.error("Error processing image message:", error);
@@ -355,18 +425,7 @@ async function handleCommand(command: string, senderId: string, installationId: 
     await sendBotMessage(
       installationId,
       senderId,
-      `记账助手使用指南：
-直接发送消费信息即可记录，例如：
-  "午饭花了35块"
-  "打车20元"
-  "发工资了15000"
-  "补录 5月20日 午饭23元"
-  "昨天买菜68元"
-
-命令：
-  /help - 查看帮助
-  /recent - 查看最近5笔记录
-  /balance - 查看本月收支`,
+      getWechatHelpMessage(),
       traceId
     );
   } else if (cmd === "/recent") {
@@ -379,12 +438,15 @@ async function handleCommand(command: string, senderId: string, installationId: 
       await sendBotMessage(installationId, senderId, "暂无记录", traceId);
       return;
     }
+    if (!member.isActive) {
+      await sendBotMessage(installationId, senderId, "该微信绑定的家庭成员已归档，请先在后台恢复", traceId);
+      return;
+    }
 
     const recent = db
       .select()
       .from(txTable)
-      .where(eq(txTable.memberId, member.id))
-      .orderBy(desc(txTable.createdAt))
+      .orderBy(desc(txTable.transactionDate), desc(txTable.createdAt))
       .limit(5)
       .all();
 
@@ -395,11 +457,12 @@ async function handleCommand(command: string, senderId: string, installationId: 
 
     const lines = recent.map((t) => {
       const cat = db.select().from(catTable).where(eq(catTable.id, t.categoryId)).get();
+      const recordMember = db.select().from(memTable).where(eq(memTable.id, t.memberId)).get();
       const typeLabel = t.type === "expense" ? "支出" : "收入";
-      return `${t.transactionDate} ${cat?.name || ""} ${typeLabel} ${t.amount.toFixed(2)}元 - ${t.description}`;
+      return `${t.transactionDate} ${recordMember?.name || "未知成员"} ${cat?.name || ""} ${typeLabel} ${t.amount.toFixed(2)}元 - ${t.description}`;
     });
 
-    await sendBotMessage(installationId, senderId, `最近5笔记录：\n${lines.join("\n")}`, traceId);
+    await sendBotMessage(installationId, senderId, `家庭最近5笔记录：\n${lines.join("\n")}`, traceId);
   } else if (cmd === "/balance") {
     const { start: startDate, end: endDate } = getMonthDateRange();
 
@@ -411,6 +474,10 @@ async function handleCommand(command: string, senderId: string, installationId: 
       await sendBotMessage(installationId, senderId, "暂无记录", traceId);
       return;
     }
+    if (!member.isActive) {
+      await sendBotMessage(installationId, senderId, "该微信绑定的家庭成员已归档，请先在后台恢复", traceId);
+      return;
+    }
 
     const stats = db
       .select({
@@ -420,7 +487,6 @@ async function handleCommand(command: string, senderId: string, installationId: 
       .from(txTable)
       .where(
         and(
-          eq(txTable.memberId, member.id),
           gte(txTable.transactionDate, startDate),
           lte(txTable.transactionDate, endDate)
         )
@@ -434,7 +500,7 @@ async function handleCommand(command: string, senderId: string, installationId: 
     await sendBotMessage(
       installationId,
       senderId,
-      `本月收支：\n收入：${income.toFixed(2)} 元\n支出：${expense.toFixed(2)} 元\n结余：${(income - expense).toFixed(2)} 元`,
+      `家庭本月收支：\n收入：${Number(income).toFixed(2)} 元\n支出：${Number(expense).toFixed(2)} 元\n结余：${(Number(income) - Number(expense)).toFixed(2)} 元`,
       traceId
     );
   } else {

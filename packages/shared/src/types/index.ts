@@ -7,11 +7,23 @@ export type AssetType =
   | "equity" // 权益投资/进攻
   | "real_estate" // 房产
   | "physical" // 实物资产（车、贵金属等）
-  | "pension" // 养老金/公积金等保障类
+  | "pension" // 养老金/公积金等受限长期储备
   | "receivable" // 应收款（借出去的钱）
   | "other";
 // 标普四象限配置桶
 export type AllocationBucket = "liquid" | "stable" | "growth" | "protection";
+/** 资产在需要用钱时的实际变现能力。 */
+export type AssetLiquidity = "immediate" | "short_term" | "restricted" | "illiquid";
+/** 资产存量是否能直接调仓；future_cash_flow 表示只能调整今后的新增资金。 */
+export type AssetRebalanceMode = "flexible" | "future_cash_flow" | "excluded";
+export type AssetPurpose =
+  | "daily"
+  | "emergency"
+  | "near_term"
+  | "retirement"
+  | "long_term_growth"
+  | "self_use"
+  | "other";
 export type LiabilityType = "mortgage" | "car_loan" | "credit_card" | "consumer_loan" | "other";
 export type InsuranceCategory =
   | "social" // 社保
@@ -23,8 +35,16 @@ export type InsuranceCategory =
   | "other";
 export type AccountType = "cash" | "bank" | "alipay" | "wechat" | "credit" | "other";
 export type MemberRole = "admin" | "member";
+export type MemberRelationship = "self" | "spouse" | "child" | "parent" | "other";
+export type MemberIncomeRole = "primary" | "secondary" | "none";
 export type TransactionSource = "wechat" | "admin";
 export type AssetFrequency = "monthly" | "quarterly" | "yearly" | "one-time";
+export type InsuranceRenewalType =
+  | "guaranteed"
+  | "review_required"
+  | "non_guaranteed"
+  | "not_applicable"
+  | "unknown";
 
 export interface Member {
   id: string;
@@ -32,8 +52,28 @@ export interface Member {
   name: string;
   avatarUrl: string | null;
   role: MemberRole;
+  relationship: MemberRelationship | null;
+  birthDate: string | null;
+  incomeRole: MemberIncomeRole | null;
+  isFinancialDependent: boolean | null;
+  isActive: boolean;
+  mergedIntoMemberId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MemberUsageSummary {
+  transactions: number;
+  assets: number;
+  liabilities: number;
+  policies: number;
+  checkups: number;
+  visits: number;
+}
+
+export interface MemberWithUsage extends Member {
+  mergedIntoMemberName: string | null;
+  usage: MemberUsageSummary;
 }
 
 export interface Category {
@@ -70,6 +110,7 @@ export interface Transaction {
   source: TransactionSource;
   aiRawInput: string | null;
   aiConfidence: number | null;
+  annualProjectId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -78,6 +119,7 @@ export interface TransactionWithRelations extends Transaction {
   category?: Category;
   account?: Account;
   member?: Member;
+  annualProject?: AnnualProject;
 }
 
 export interface Asset {
@@ -89,6 +131,12 @@ export interface Asset {
   currency: string;
   /** 配置象限：活钱/稳健/进攻/保障 */
   allocationBucket: AllocationBucket;
+  /** 变现能力，用于现金安全判断。 */
+  liquidity: AssetLiquidity;
+  /** 调整方式，用于判断是否纳入目标配置及如何给出调整建议。 */
+  rebalanceMode: AssetRebalanceMode;
+  /** 主要资金用途，用于解释资产性质。 */
+  purpose: AssetPurpose;
   /** 具体账户信息，如「程伟光-招行」 */
   accountInfo: string | null;
   /** 投入成本（投资类用于算累计收益，可空） */
@@ -142,6 +190,8 @@ export interface InsurancePolicy {
   category: InsuranceCategory;
   /** 被保人成员 */
   insuredMemberId: string | null;
+  policyholderMemberId: string | null;
+  policyNumber: string | null;
   insurer: string | null;
   /** 保额 */
   coverageAmount: number | null;
@@ -152,10 +202,131 @@ export interface InsurancePolicy {
   cashValue: number | null;
   startDate: string | null;
   endDate: string | null;
+  coverageSummary: string | null;
+  coverageTerm: string | null;
+  deductible: number | null;
+  reimbursementRatio: number | null;
+  waitingPeriodDays: number | null;
+  renewalType: InsuranceRenewalType | null;
+  renewalUntilAge: number | null;
+  annualLimit: number | null;
+  beneficiary: string | null;
+  keyClauses: string | null;
+  keyExclusions: string | null;
+  reviewedAt: string | null;
+  claimPhone: string | null;
+  claimContact: string | null;
+  claimContactPhone: string | null;
+  claimChannels: string | null;
+  claimSteps: string | null;
+  claimMaterials: string | null;
+  claimNotes: string | null;
   note: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export type InsuranceAttachmentType =
+  | "policy"
+  | "terms"
+  | "payment"
+  | "claim_guide"
+  | "other";
+
+export interface InsuranceAttachment {
+  id: string;
+  policyId: string;
+  type: InsuranceAttachmentType;
+  filePath: string;
+  originalFileName: string | null;
+  caption: string | null;
+  createdAt: string;
+}
+
+export interface AnnualProject {
+  id: string;
+  year: number;
+  name: string;
+  budgetAmount: number;
+  startDate: string | null;
+  endDate: string | null;
+  keywords: string[];
+  note: string | null;
+  isActive: boolean;
+  actualAmount?: number;
+  remainingAmount?: number;
+  executionRate?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BudgetCategoryLine {
+  categoryId: string;
+  categoryName: string;
+  color: string | null;
+  budgetAmount: number;
+  actualAmount: number;
+  remainingAmount: number;
+  executionRate: number | null;
+  transactionCount: number;
+  status: "normal" | "warning" | "exceeded";
+}
+
+export interface BudgetOutsideLine {
+  categoryId: string;
+  categoryName: string;
+  color: string | null;
+  actualAmount: number;
+  transactionCount: number;
+}
+
+export interface MonthlyBudgetExecution {
+  month: string;
+  budgetId: string | null;
+  totalBudget: number;
+  allocatedBudget: number;
+  unallocatedBudget: number;
+  budgetedActual: number;
+  outsideBudgetActual: number;
+  specialProjectActual: number;
+  dailyActual: number;
+  allExpense: number;
+  remainingBudget: number;
+  executionRate: number | null;
+  elapsedRate: number;
+  warningCount: number;
+  note: string | null;
+  categoryLines: BudgetCategoryLine[];
+  outsideBudgetLines: BudgetOutsideLine[];
+  specialProjects: AnnualProject[];
+}
+
+export interface AnnualBudgetExecution {
+  year: number;
+  budgetId: string | null;
+  expectedIncome: number;
+  actualIncome: number;
+  regularBudget: number;
+  specialBudget: number;
+  totalBudget: number;
+  regularActual: number;
+  specialActual: number;
+  outsideBudgetActual: number;
+  totalActual: number;
+  projectedSurplus: number;
+  projectedSavingsRate: number | null;
+  actualSurplus: number;
+  elapsedRate: number;
+  note: string | null;
+  categoryLines: BudgetCategoryLine[];
+  outsideBudgetLines: BudgetOutsideLine[];
+  specialProjects: AnnualProject[];
+}
+
+export interface BudgetSnapshot {
+  monthly: MonthlyBudgetExecution | null;
+  annual: AnnualBudgetExecution | null;
 }
 
 export interface Setting {
@@ -293,6 +464,16 @@ export interface AllocationStat {
   gapAmount: number;
 }
 
+export interface AllocationOverview {
+  data: AllocationStat[];
+  /** 参与目标比例比较的金融资产。 */
+  totalAssets: number;
+  totalBalanceSheetAssets: number;
+  futureCashFlowOnlyAssets: number;
+  excludedAssets: number;
+  insuranceCashValueExcluded: number;
+}
+
 export interface InvestmentPerformanceItem {
   id: string;
   name: string;
@@ -326,6 +507,187 @@ export interface EmergencyFundStat {
   targetAmount: number;
   coverageMonths: number | null;
   status: "sufficient" | "warning" | "insufficient" | "unknown";
+  /** 实际用于计算月均支出的统计周期 */
+  sampleStart: string | null;
+  sampleEnd: string | null;
+  sampleMonths: number;
+  /** 少于3个完整月时仅供参考 */
+  dataQuality: "sufficient" | "insufficient";
+  /** 没有完整月份时是否临时采用了当月数据 */
+  usesPartialMonth: boolean;
+}
+
+export interface AssetPreferences {
+  targetAllocation: Record<AllocationBucket, number>;
+  emergencyFundMonths: number;
+}
+
+// ---- 家庭财务诊断（确定性计算，不含 AI 结论） ----
+
+export interface FinancialDiagnosisWarning {
+  code: string;
+  level: "info" | "warning";
+  message: string;
+}
+
+export interface NetWorthDiagnosis {
+  totalAssets: number;
+  totalLiabilities: number;
+  netWorth: number;
+  snapshotDate: string;
+  baselineDate: string;
+  baselineNetWorth: number;
+  changeAmount: number | null;
+  changeRate: number | null;
+  previousDate: string | null;
+  previousNetWorth: number | null;
+  previousChangeAmount: number | null;
+  historyStatus: "baseline_only" | "available";
+}
+
+export interface SavingsDiagnosis {
+  periodStart: string;
+  periodEnd: string;
+  actualIncome: number;
+  actualExpense: number;
+  netSavings: number;
+  savingsRate: number | null;
+  incomeTransactionCount: number;
+  expenseTransactionCount: number;
+  expectedAnnualIncome: number;
+  expectedIncomeProgressRate: number | null;
+  basis: "ledger_transactions";
+  assetValuationChangesExcluded: true;
+}
+
+export interface AllocationDiagnosisItem {
+  bucket: AllocationBucket;
+  label: string;
+  amount: number;
+  currentRatio: number;
+  targetRatio: number;
+  deviationPoints: number;
+  gapAmount: number;
+  status: "on_target" | "over" | "under";
+}
+
+export interface AllocationDiagnosis {
+  /** 参与目标比例比较的金融资产金额（保留 totalAssets 字段兼容现有页面）。 */
+  totalAssets: number;
+  /** 家庭资产负债表中的全部资产，包含受限/自用资产及保单现金价值。 */
+  totalBalanceSheetAssets: number;
+  freelyRebalanceableAssets: number;
+  futureCashFlowOnlyAssets: number;
+  excludedAssets: number;
+  excludedAssetCount: number;
+  insuranceCashValueExcluded: number;
+  deviationThresholdPoints: number;
+  maxAbsoluteDeviationPoints: number | null;
+  status: "on_target" | "deviated" | "unknown";
+  items: AllocationDiagnosisItem[];
+  assets: AssetDiagnosisItem[];
+}
+
+export interface AssetDiagnosisItem {
+  id: string;
+  name: string;
+  type: AssetType;
+  amount: number;
+  allocationBucket: AllocationBucket;
+  liquidity: AssetLiquidity;
+  rebalanceMode: AssetRebalanceMode;
+  purpose: AssetPurpose;
+  includedInAllocation: boolean;
+}
+
+export interface LiquidityDiagnosis {
+  /** 可随时动用的资产；不再仅凭“四象限=活钱”判断。 */
+  liquidAssets: number;
+  shortTermLiquidAssets: number;
+  regularMonthlyRequirement: number;
+  specialProjectMonthlyReserve: number;
+  plannedMonthlyRequirement: number;
+  coverageMonths: number | null;
+  targetMonths: number;
+  targetAmount: number;
+  gapAmount: number | null;
+  status: "sufficient" | "warning" | "insufficient" | "unknown";
+  regularBasis: "monthly_budget" | "annual_budget" | "actual_average" | "unavailable";
+  actualSampleMonths: number;
+  usesPartialMonth: boolean;
+  remainingSpecialBudget: number;
+  remainingMonths: number;
+  dataQuality: "sufficient" | "insufficient";
+}
+
+export interface InsuranceMemberDiagnosis {
+  memberId: string;
+  memberName: string;
+  relationship: MemberRelationship | null;
+  incomeRole: MemberIncomeRole | null;
+  isFinancialDependent: boolean | null;
+  policyCount: number;
+  categories: InsuranceCategory[];
+  coverageByCategory: Partial<Record<InsuranceCategory, number>>;
+  profileMissing: string[];
+  policyDataMissing: string[];
+}
+
+export interface InsuranceDiagnosis {
+  activeMemberCount: number;
+  activePolicyCount: number;
+  assignedPolicyCount: number;
+  membersWithPolicyCount: number;
+  recurringAnnualPremium: number;
+  premiumBurdenRate: number | null;
+  premiumIncomeBasis: "annual_budget_expected" | "unavailable";
+  unannualizedPremiumPolicyCount: number;
+  dataStatus: "ready" | "partial" | "missing";
+  adequacyConclusionAvailable: false;
+  members: InsuranceMemberDiagnosis[];
+}
+
+export interface DebtDiagnosis {
+  totalLiabilities: number;
+  totalAssets: number;
+  debtToAssetRatio: number | null;
+  monthlyPayment: number;
+  annualDebtServiceRate: number | null;
+  incomeBasis: "annual_budget_expected" | "unavailable";
+}
+
+export interface InvestmentDiagnosis {
+  trackedAssetCount: number;
+  missingCostBasisCount: number;
+  totalCost: number;
+  currentValue: number;
+  totalGain: number;
+  returnRate: number | null;
+}
+
+export interface FinancialDiagnosisReport {
+  generatedAt: string;
+  asOfDate: string;
+  year: number;
+  month: string;
+  netWorth: NetWorthDiagnosis;
+  savings: SavingsDiagnosis;
+  allocation: AllocationDiagnosis;
+  liquidity: LiquidityDiagnosis;
+  insurance: InsuranceDiagnosis;
+  debt: DebtDiagnosis;
+  investment: InvestmentDiagnosis;
+  monthlyBudget: MonthlyBudgetExecution;
+  annualBudget: AnnualBudgetExecution;
+  warnings: FinancialDiagnosisWarning[];
+  methodologyNotes: string[];
+}
+
+export interface FinancialDiagnosisAIResponse {
+  asOfDate: string;
+  generatedAt: string;
+  analysis: string;
+  snapshot: FinancialDiagnosisReport;
 }
 
 export interface FinancialAnalysisRequest {
@@ -366,6 +728,7 @@ export interface FinancialAnalysisSnapshot {
   topTransactions: FinancialAnalysisTopTransaction[];
   recurringCandidates: FinancialAnalysisRecurringCandidate[];
   assetSummary: AssetSummary[];
+  budgetSnapshot: BudgetSnapshot | null;
 }
 
 export interface FinancialAnalysisResponse {
@@ -394,6 +757,8 @@ export interface ParsedTransaction {
   description: string;
   category: string;
   transactionDate?: string;
+  /** AI 建议的年度专项名称，最终仍由后端校验或通过微信确认 */
+  annualProjectName?: string | null;
 }
 
 // ---- 健康管理：体检报告 ----

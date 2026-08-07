@@ -1,5 +1,8 @@
 import type {
   AllocationBucket,
+  AssetLiquidity,
+  AssetPurpose,
+  AssetRebalanceMode,
   AssetType,
   CategoryType,
   InsuranceCategory,
@@ -75,9 +78,48 @@ export const ASSET_TYPE_TO_BUCKET: Record<AssetType, AllocationBucket> = {
   equity: "growth",
   real_estate: "stable",
   physical: "stable",
-  pension: "protection",
+  // 公积金/养老金的经济属性更接近低波动储备；受限性由 liquidity/rebalanceMode 表达。
+  pension: "stable",
   receivable: "stable",
   other: "stable",
+};
+
+export const ASSET_LIQUIDITY_LABELS: Record<AssetLiquidity, string> = {
+  immediate: "可随时使用",
+  short_term: "短期可变现",
+  restricted: "受条件限制",
+  illiquid: "难以变现",
+};
+
+export const ASSET_REBALANCE_MODE_LABELS: Record<AssetRebalanceMode, string> = {
+  flexible: "可直接调整",
+  future_cash_flow: "仅调整未来新增资金",
+  excluded: "不参与配置调仓",
+};
+
+export const ASSET_PURPOSE_LABELS: Record<AssetPurpose, string> = {
+  daily: "日常周转",
+  emergency: "应急储备",
+  near_term: "近期目标",
+  retirement: "养老储备",
+  long_term_growth: "长期增值",
+  self_use: "家庭自用",
+  other: "其他用途",
+};
+
+export const ASSET_TYPE_DEFAULT_PROFILE: Record<AssetType, {
+  liquidity: AssetLiquidity;
+  rebalanceMode: AssetRebalanceMode;
+  purpose: AssetPurpose;
+}> = {
+  cash: { liquidity: "immediate", rebalanceMode: "flexible", purpose: "daily" },
+  fixed_income: { liquidity: "short_term", rebalanceMode: "flexible", purpose: "near_term" },
+  equity: { liquidity: "short_term", rebalanceMode: "flexible", purpose: "long_term_growth" },
+  real_estate: { liquidity: "illiquid", rebalanceMode: "excluded", purpose: "self_use" },
+  physical: { liquidity: "illiquid", rebalanceMode: "excluded", purpose: "self_use" },
+  pension: { liquidity: "restricted", rebalanceMode: "future_cash_flow", purpose: "retirement" },
+  receivable: { liquidity: "restricted", rebalanceMode: "excluded", purpose: "other" },
+  other: { liquidity: "restricted", rebalanceMode: "excluded", purpose: "other" },
 };
 
 export const LIABILITY_TYPE_LABELS: Record<LiabilityType, string> = {

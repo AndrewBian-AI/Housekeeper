@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { api } from "@/api/client";
 import type {
   AllocationStat,
+  AllocationOverview,
+  AllocationBucket,
+  AssetPreferences,
   CompositionItem,
   EmergencyFundStat,
   InvestmentPerformance,
@@ -9,7 +12,7 @@ import type {
   NetWorthOverview,
   NetWorthTrendPoint,
 } from "@caiwu/shared";
-import { ALLOCATION_BUCKET_COLORS } from "@caiwu/shared";
+import { ALLOCATION_BUCKET_COLORS, ALLOCATION_BUCKET_LABELS } from "@caiwu/shared";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatCurrency, formatCompact, formatPercent } from "./helpers";
 
@@ -24,9 +27,14 @@ export function OverviewTab({ refreshKey }: { refreshKey: number }) {
   const [overview, setOverview] = useState<NetWorthOverview | null>(null);
   const [composition, setComposition] = useState<NetWorthComposition | null>(null);
   const [allocation, setAllocation] = useState<AllocationStat[]>([]);
+  const [allocationOverview, setAllocationOverview] = useState<AllocationOverview | null>(null);
   const [investments, setInvestments] = useState<InvestmentPerformance | null>(null);
   const [trend, setTrend] = useState<NetWorthTrendPoint[]>([]);
   const [emergency, setEmergency] = useState<EmergencyFundStat | null>(null);
+  const [preferences, setPreferences] = useState<AssetPreferences | null>(null);
+  const [showPreferences, setShowPreferences] = useState(false);
+  const [preferencesError, setPreferencesError] = useState("");
+  const [localRefresh, setLocalRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -34,21 +42,24 @@ export function OverviewTab({ refreshKey }: { refreshKey: number }) {
     (async () => {
       setLoading(true);
       try {
-        const [o, c, a, inv, t, e] = await Promise.all([
+        const [o, c, a, inv, t, e, p] = await Promise.all([
           api.get<NetWorthOverview>("/networth/overview"),
           api.get<NetWorthComposition>("/networth/composition"),
-          api.get<{ data: AllocationStat[] }>("/networth/allocation"),
+          api.get<AllocationOverview>("/networth/allocation"),
           api.get<InvestmentPerformance>("/networth/investments"),
           api.get<{ data: NetWorthTrendPoint[] }>("/networth/trend"),
           api.get<EmergencyFundStat>("/networth/emergency-fund"),
+          api.get<AssetPreferences>("/networth/preferences"),
         ]);
         if (cancelled) return;
         setOverview(o);
         setComposition(c);
         setAllocation(a.data);
+        setAllocationOverview(a);
         setInvestments(inv);
         setTrend(t.data);
         setEmergency(e);
+        setPreferences(p);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -56,7 +67,24 @@ export function OverviewTab({ refreshKey }: { refreshKey: number }) {
     return () => {
       cancelled = true;
     };
-  }, [refreshKey]);
+  }, [refreshKey, localRefresh]);
+
+  const savePreferences = async (next: AssetPreferences) => {
+    setPreferencesError("");
+    const total = Object.values(next.targetAllocation).reduce((sum, value) => sum + value, 0);
+    if (Math.abs(total - 100) > 0.001) {
+      setPreferencesError(`四类目标比例当前合计为 ${total}%，必须等于100%`);
+      return;
+    }
+    try {
+      await api.put("/networth/preferences", next);
+      setPreferences(next);
+      setShowPreferences(false);
+      setLocalRefresh((value) => value + 1);
+    } catch (e) {
+      setPreferencesError(e instanceof Error ? e.message : "设置保存失败");
+    }
+  };
 
   if (loading) return <div className="text-muted-foreground">加载中...</div>;
 
@@ -98,8 +126,8 @@ export function OverviewTab({ refreshKey }: { refreshKey: number }) {
             </ResponsiveContainer>
           ) : (
             <div className="flex h-[260px] flex-col items-center justify-center gap-1 text-center text-muted-foreground">
-              <p>趋势需要多次估值记录</p>
-              <p className="text-xs">在「资产」标签里点资产的趋势图标，定期记录市值即可形成曲线</p>
+              <p>当前仅有一个净资产数据点</p>
+              <p className="text-xs">不同日期进入「AI分析 → 资产配置诊断」后，系统会形成真实净资产趋势，不会倒推历史</p>
             </div>
           )}
         </div>
@@ -113,7 +141,7 @@ export function OverviewTab({ refreshKey }: { refreshKey: number }) {
                 <p className="text-xl font-bold">{formatCurrency(emergency.liquidAssets)}</p>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">月均支出</span>
+                <span className="text-muted-foreground">月度资金需求</span>
                 <span>{formatCurrency(emergency.averageMonthlyExpense)}</span>
               </div>
               <div className="flex justify-between text-sm">
@@ -126,6 +154,17 @@ export function OverviewTab({ refreshKey }: { refreshKey: number }) {
                   {emergency.coverageMonths == null ? "—" : `${emergency.coverageMonths} 个月`} · {EMERGENCY_STATUS[emergency.status].label}
                 </span>
               </div>
+              {emergency.sampleStart && emergency.sampleEnd && (
+                <p className="border-t pt-3 text-xs text-muted-foreground">
+                  统计期：{emergency.sampleStart} 至 {emergency.sampleEnd}
+                  {emergency.usesPartialMonth ? "（当月尚未结束）" : `（${emergency.sampleMonths}个完整月）`}
+                </p>
+              )}
+              {emergency.dataQuality === "insufficient" && (
+                <p className="rounded bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
+                  月度预算、年度预算或历史日常支出依据不足，覆盖月数仅供参考。
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -133,7 +172,15 @@ export function OverviewTab({ refreshKey }: { refreshKey: number }) {
 
       {/* 配置 vs 目标 */}
       <div className="rounded-lg border bg-card p-4">
-        <h3 className="mb-4 font-medium">资产配置（当前 vs 目标）</h3>
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <div>
+            <h3 className="font-medium">可配置金融资产（当前 vs 目标）</h3>
+            <p className="mt-1 text-xs text-muted-foreground">比例仅使用可直接调整及可通过未来新增资金调整的资产；自用/不参与调仓资产和保单现金价值不进入分母。</p>
+          </div>
+          <button onClick={() => setShowPreferences(true)} className="rounded border px-3 py-1.5 text-sm">
+            参数设置
+          </button>
+        </div>
         <div className="space-y-4">
           {allocation.map((a) => (
             <div key={a.bucket} className="space-y-1.5">
@@ -161,12 +208,19 @@ export function OverviewTab({ refreshKey }: { refreshKey: number }) {
             </div>
           ))}
           {allocation.length === 0 && <p className="text-sm text-muted-foreground">暂无资产数据</p>}
+          {allocationOverview && (
+            <div className="grid gap-2 border-t pt-3 text-xs text-muted-foreground sm:grid-cols-3">
+              <span>参与配置：{formatCurrency(allocationOverview.totalAssets)}</span>
+              <span>其中仅可调整未来资金：{formatCurrency(allocationOverview.futureCashFlowOnlyAssets)}</span>
+              <span>不参与调仓：{formatCurrency(allocationOverview.excludedAssets + allocationOverview.insuranceCashValueExcluded)}</span>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* 构成：象限 + 成员 */}
+      {/* 全量资产负债表构成：与上方可配置金融资产比例分开 */}
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-        <CompositionCard title="按配置象限" items={composition?.byBucket || []} />
+        <CompositionCard title="按资产大类（全量资产）" items={composition?.byType || []} />
         <CompositionCard title="按成员（净值）" items={composition?.byMember || []} />
       </div>
 
@@ -215,6 +269,92 @@ export function OverviewTab({ refreshKey }: { refreshKey: number }) {
         ) : (
           <p className="text-sm text-muted-foreground">在「资产」里给投资类资产填写「投入成本」，这里就会出现收益分析</p>
         )}
+      </div>
+
+      {showPreferences && preferences && (
+        <PreferencesModal
+          initial={preferences}
+          error={preferencesError}
+          onClose={() => {
+            setShowPreferences(false);
+            setPreferencesError("");
+          }}
+          onSave={savePreferences}
+        />
+      )}
+    </div>
+  );
+}
+
+const PREFERENCE_BUCKETS: AllocationBucket[] = ["liquid", "stable", "growth", "protection"];
+
+function PreferencesModal({
+  initial,
+  error,
+  onClose,
+  onSave,
+}: {
+  initial: AssetPreferences;
+  error: string;
+  onClose: () => void;
+  onSave: (value: AssetPreferences) => void;
+}) {
+  const [value, setValue] = useState<AssetPreferences>({
+    targetAllocation: { ...initial.targetAllocation },
+    emergencyFundMonths: initial.emergencyFundMonths,
+  });
+  const total = PREFERENCE_BUCKETS.reduce((sum, bucket) => sum + value.targetAllocation[bucket], 0);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-lg bg-card p-6" onClick={(event) => event.stopPropagation()}>
+        <h3 className="mb-1 font-bold">资产分析参数</h3>
+        <p className="mb-4 text-xs text-muted-foreground">配置比例合计必须为100%，应急资金目标可设置为1至24个月。</p>
+        <div className="space-y-3">
+          {error && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
+          {PREFERENCE_BUCKETS.map((bucket) => (
+            <label key={bucket} className="flex items-center justify-between gap-3 text-sm">
+              <span>{ALLOCATION_BUCKET_LABELS[bucket]}</span>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={value.targetAllocation[bucket]}
+                  onChange={(event) =>
+                    setValue({
+                      ...value,
+                      targetAllocation: {
+                        ...value.targetAllocation,
+                        [bucket]: Number(event.target.value),
+                      },
+                    })
+                  }
+                  className="w-24 rounded border px-3 py-2 text-right"
+                />
+                <span>%</span>
+              </div>
+            </label>
+          ))}
+          <p className={`text-right text-xs ${total === 100 ? "text-green-600" : "text-red-500"}`}>当前合计：{total}%</p>
+          <label className="flex items-center justify-between gap-3 border-t pt-3 text-sm">
+            <span>应急资金目标月数</span>
+            <input
+              type="number"
+              min="1"
+              max="24"
+              step="1"
+              value={value.emergencyFundMonths}
+              onChange={(event) => setValue({ ...value, emergencyFundMonths: Number(event.target.value) })}
+              className="w-24 rounded border px-3 py-2 text-right"
+            />
+          </label>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded border px-4 py-2 text-sm">取消</button>
+          <button onClick={() => onSave(value)} className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground">保存</button>
+        </div>
       </div>
     </div>
   );

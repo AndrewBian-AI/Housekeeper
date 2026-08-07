@@ -106,6 +106,7 @@ export async function healthCheckupRoutes(app: FastifyInstance) {
     if (!memberId) return reply.status(400).send({ error: "memberId 必填" });
     const member = db.select().from(members).where(eq(members.id, memberId)).get();
     if (!member) return reply.status(400).send({ error: "成员不存在" });
+    if (!member.isActive) return reply.status(400).send({ error: "已归档成员不能新增体检记录" });
 
     const id = nanoid();
     let filePath: string | null = null;
@@ -253,6 +254,12 @@ export async function healthCheckupRoutes(app: FastifyInstance) {
     const { id } = request.params;
     const existing = db.select().from(healthCheckups).where(eq(healthCheckups.id, id)).get();
     if (!existing) return reply.status(404).send({ error: "Not found" });
+    if (request.body.memberId !== undefined && request.body.memberId !== existing.memberId) {
+      const member = db.select().from(members).where(eq(members.id, request.body.memberId as string)).get();
+      if (!member || !member.isActive) {
+        return reply.status(400).send({ error: "请选择生效中的家庭成员" });
+      }
+    }
     const allowed = [
       "memberId",
       "checkupDate",

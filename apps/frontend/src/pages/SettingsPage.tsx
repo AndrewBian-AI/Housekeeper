@@ -27,11 +27,12 @@ const SECTIONS = [
   },
   {
     title: "AI 提示词",
-    description: "自定义 AI 解析和月度总结的提示词模板",
+    description: "自定义 AI 解析、月度总结和资产配置诊断的提示词模板",
     fields: [
       { key: "ai.parse_prompt", label: "消息解析提示词", type: "textarea", placeholder: "你是一个家庭财务助手..." },
       { key: "ai.monthly_summary_prompt", label: "月度总结提示词", type: "textarea", placeholder: "请根据以下数据生成月度财务分析..." },
       { key: "ai.financial_analysis_prompt", label: "前台 AI 分析提示词", type: "textarea", placeholder: "你是一个务实的家庭财务分析师..." },
+      { key: "ai.financial_diagnosis_prompt", label: "资产配置诊断提示词", type: "textarea", placeholder: "你是一名谨慎、务实的家庭财务规划助手..." },
     ],
   },
   {
@@ -49,6 +50,12 @@ const SECTIONS = [
     fields: [
       { key: "hub.url", label: "Hub 地址", type: "text", placeholder: "https://hub.openilink.com" },
       { key: "hub.base_url", label: "系统公网地址", type: "text", placeholder: "https://your-domain.com" },
+      {
+        key: "wechat.help_message",
+        label: "/help 帮助文案",
+        type: "textarea",
+        placeholder: "输入微信中执行 /help 时回复的内容",
+      },
     ],
   },
 ];
@@ -110,7 +117,8 @@ export function SettingsPage() {
               <label className="text-sm font-medium">{field.label}</label>
               {field.type === "textarea" ? (
                 <textarea value={settings[field.key] || ""} onChange={(e) => handleChange(field.key, e.target.value)}
-                  placeholder={field.placeholder} rows={4} className="w-full px-3 py-2 border rounded text-sm resize-y" />
+                  placeholder={field.placeholder} rows={field.key === "wechat.help_message" ? 10 : 4}
+                  className="w-full px-3 py-2 border rounded text-sm resize-y" />
               ) : field.type === "toggle" ? (
                 <button onClick={() => handleChange(field.key, settings[field.key] === "true" ? "false" : "true")}
                   className={`px-3 py-1 rounded text-sm ${settings[field.key] === "true" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>

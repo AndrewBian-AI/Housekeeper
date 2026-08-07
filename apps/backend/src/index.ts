@@ -16,6 +16,7 @@ import { assetRoutes } from "./routes/assets.js";
 import { liabilityRoutes } from "./routes/liabilities.js";
 import { insuranceRoutes } from "./routes/insurance.js";
 import { netWorthRoutes } from "./routes/networth.js";
+import { financialDiagnosisRoutes } from "./routes/financial-diagnosis.js";
 import { categoryRoutes } from "./routes/categories.js";
 import { accountRoutes } from "./routes/accounts.js";
 import { memberRoutes } from "./routes/members.js";
@@ -23,6 +24,7 @@ import { settingRoutes } from "./routes/settings.js";
 import { messageRoutes } from "./routes/messages.js";
 import { healthCheckupRoutes } from "./routes/health-checkups.js";
 import { medicalVisitRoutes } from "./routes/medical-visits.js";
+import { budgetRoutes } from "./routes/budgets.js";
 import { hubWebhookRoutes } from "./hub/webhook.js";
 import { hubOAuthRoutes } from "./hub/oauth.js";
 import { hubManifestRoutes } from "./hub/manifest.js";
@@ -56,6 +58,8 @@ function initDatabase() {
       name TEXT NOT NULL,
       avatar_url TEXT,
       role TEXT NOT NULL DEFAULT 'member',
+      is_active INTEGER NOT NULL DEFAULT 1,
+      merged_into_member_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -105,6 +109,9 @@ function initDatabase() {
       amount REAL NOT NULL,
       currency TEXT NOT NULL DEFAULT 'CNY',
       allocation_bucket TEXT NOT NULL DEFAULT 'stable',
+      liquidity TEXT NOT NULL DEFAULT 'short_term',
+      rebalance_mode TEXT NOT NULL DEFAULT 'flexible',
+      purpose TEXT NOT NULL DEFAULT 'other',
       account_info TEXT,
       cost_basis REAL,
       sort_order INTEGER NOT NULL DEFAULT 0,
@@ -126,6 +133,7 @@ function initDatabase() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_asset_valuations_asset ON asset_valuations(asset_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_asset_valuations_asset_date ON asset_valuations(asset_id, date);
     CREATE TABLE IF NOT EXISTS liabilities (
       id TEXT PRIMARY KEY,
       type TEXT NOT NULL,
@@ -267,7 +275,33 @@ function initDatabase() {
     );
     CREATE INDEX IF NOT EXISTS idx_medical_visit_medications_visit ON medical_visit_medications(visit_id);
   `);
+  migrateMembersTable();
   migrateAssetsTable();
+  migratePlanningTables();
+}
+
+/** 成员身份治理与保障诊断基础资料：只增列，不改写现有成员或业务数据。 */
+function migrateMembersTable() {
+  addColumnIfMissing(
+    "members",
+    "is_active",
+    "ALTER TABLE members ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1"
+  );
+  addColumnIfMissing(
+    "members",
+    "merged_into_member_id",
+    "ALTER TABLE members ADD COLUMN merged_into_member_id TEXT"
+  );
+  addColumnIfMissing("members", "relationship", "ALTER TABLE members ADD COLUMN relationship TEXT");
+  addColumnIfMissing("members", "birth_date", "ALTER TABLE members ADD COLUMN birth_date TEXT");
+  addColumnIfMissing("members", "income_role", "ALTER TABLE members ADD COLUMN income_role TEXT");
+  addColumnIfMissing(
+    "members",
+    "is_financial_dependent",
+    "ALTER TABLE members ADD COLUMN is_financial_dependent INTEGER"
+  );
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_members_active ON members(is_active)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_members_merged_into ON members(merged_into_member_id)");
 }
 
 // 给已存在的 assets 表补齐新列、迁移旧的 type 取值。幂等、非破坏，
@@ -277,12 +311,54 @@ function migrateAssetsTable() {
   const existing = new Set(columns.map((c) => c.name));
   const additions: Array<[string, string]> = [
     ["allocation_bucket", "ALTER TABLE assets ADD COLUMN allocation_bucket TEXT NOT NULL DEFAULT 'stable'"],
+    ["liquidity", "ALTER TABLE assets ADD COLUMN liquidity TEXT NOT NULL DEFAULT 'short_term'"],
+    ["rebalance_mode", "ALTER TABLE assets ADD COLUMN rebalance_mode TEXT NOT NULL DEFAULT 'flexible'"],
+    ["purpose", "ALTER TABLE assets ADD COLUMN purpose TEXT NOT NULL DEFAULT 'other'"],
     ["account_info", "ALTER TABLE assets ADD COLUMN account_info TEXT"],
     ["cost_basis", "ALTER TABLE assets ADD COLUMN cost_basis REAL"],
     ["sort_order", "ALTER TABLE assets ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"],
   ];
   for (const [name, ddl] of additions) {
     if (!existing.has(name)) sqlite.exec(ddl);
+  }
+
+  // 只在本次首次增加诊断属性时，根据资产大类给历史资产设置保守默认值。
+  // 不改金额、名称或配置象限；用户可在资产明细中逐项复核。
+  if (!existing.has("liquidity")) {
+    sqlite.exec(`UPDATE assets SET liquidity = CASE type
+      WHEN 'cash' THEN 'immediate'
+      WHEN 'fixed_income' THEN 'short_term'
+      WHEN 'equity' THEN 'short_term'
+      WHEN 'investment' THEN 'short_term'
+      WHEN 'real_estate' THEN 'illiquid'
+      WHEN 'physical' THEN 'illiquid'
+      WHEN 'pension' THEN 'restricted'
+      ELSE 'restricted'
+    END`);
+  }
+  if (!existing.has("rebalance_mode")) {
+    sqlite.exec(`UPDATE assets SET rebalance_mode = CASE type
+      WHEN 'cash' THEN 'flexible'
+      WHEN 'fixed_income' THEN 'flexible'
+      WHEN 'equity' THEN 'flexible'
+      WHEN 'investment' THEN 'flexible'
+      WHEN 'pension' THEN 'future_cash_flow'
+      WHEN 'insurance' THEN 'future_cash_flow'
+      ELSE 'excluded'
+    END`);
+  }
+  if (!existing.has("purpose")) {
+    sqlite.exec(`UPDATE assets SET purpose = CASE type
+      WHEN 'cash' THEN 'daily'
+      WHEN 'fixed_income' THEN 'near_term'
+      WHEN 'equity' THEN 'long_term_growth'
+      WHEN 'investment' THEN 'long_term_growth'
+      WHEN 'real_estate' THEN 'self_use'
+      WHEN 'physical' THEN 'self_use'
+      WHEN 'pension' THEN 'retirement'
+      WHEN 'insurance' THEN 'retirement'
+      ELSE 'other'
+    END`);
   }
 
   // 映射旧的资产大类取值（数据为测试数据，可直接修改），并回填配置象限默认值。
@@ -296,12 +372,152 @@ function migrateAssetsTable() {
       WHEN 'equity' THEN 'growth'
       WHEN 'real_estate' THEN 'stable'
       WHEN 'physical' THEN 'stable'
-      WHEN 'pension' THEN 'protection'
+      WHEN 'pension' THEN 'stable'
       WHEN 'receivable' THEN 'stable'
       ELSE 'stable'
     END
     WHERE allocation_bucket IS NULL OR allocation_bucket = '';
+    UPDATE assets SET liquidity = 'restricted'
+      WHERE liquidity IS NULL OR liquidity NOT IN ('immediate', 'short_term', 'restricted', 'illiquid');
+    UPDATE assets SET rebalance_mode = 'excluded'
+      WHERE rebalance_mode IS NULL OR rebalance_mode NOT IN ('flexible', 'future_cash_flow', 'excluded');
+    UPDATE assets SET purpose = 'other'
+      WHERE purpose IS NULL OR purpose NOT IN ('daily', 'emergency', 'near_term', 'retirement', 'long_term_growth', 'self_use', 'other');
   `);
+}
+
+function addColumnIfMissing(table: string, column: string, ddl: string) {
+  const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!columns.some((item) => item.name === column)) sqlite.exec(ddl);
+}
+
+/** 家庭预算、保险理赔和微信专项确认：只增表/增列，兼容已有数据。 */
+function migratePlanningTables() {
+  const insuranceColumns: Array<[string, string]> = [
+    ["policyholder_member_id", "ALTER TABLE insurance_policies ADD COLUMN policyholder_member_id TEXT REFERENCES members(id)"],
+    ["policy_number", "ALTER TABLE insurance_policies ADD COLUMN policy_number TEXT"],
+    ["claim_phone", "ALTER TABLE insurance_policies ADD COLUMN claim_phone TEXT"],
+    ["claim_contact", "ALTER TABLE insurance_policies ADD COLUMN claim_contact TEXT"],
+    ["claim_contact_phone", "ALTER TABLE insurance_policies ADD COLUMN claim_contact_phone TEXT"],
+    ["claim_channels", "ALTER TABLE insurance_policies ADD COLUMN claim_channels TEXT"],
+    ["claim_steps", "ALTER TABLE insurance_policies ADD COLUMN claim_steps TEXT"],
+    ["claim_materials", "ALTER TABLE insurance_policies ADD COLUMN claim_materials TEXT"],
+    ["claim_notes", "ALTER TABLE insurance_policies ADD COLUMN claim_notes TEXT"],
+    ["coverage_summary", "ALTER TABLE insurance_policies ADD COLUMN coverage_summary TEXT"],
+    ["coverage_term", "ALTER TABLE insurance_policies ADD COLUMN coverage_term TEXT"],
+    ["deductible", "ALTER TABLE insurance_policies ADD COLUMN deductible REAL"],
+    ["reimbursement_ratio", "ALTER TABLE insurance_policies ADD COLUMN reimbursement_ratio REAL"],
+    ["waiting_period_days", "ALTER TABLE insurance_policies ADD COLUMN waiting_period_days INTEGER"],
+    ["renewal_type", "ALTER TABLE insurance_policies ADD COLUMN renewal_type TEXT"],
+    ["renewal_until_age", "ALTER TABLE insurance_policies ADD COLUMN renewal_until_age INTEGER"],
+    ["annual_limit", "ALTER TABLE insurance_policies ADD COLUMN annual_limit REAL"],
+    ["beneficiary", "ALTER TABLE insurance_policies ADD COLUMN beneficiary TEXT"],
+    ["key_clauses", "ALTER TABLE insurance_policies ADD COLUMN key_clauses TEXT"],
+    ["key_exclusions", "ALTER TABLE insurance_policies ADD COLUMN key_exclusions TEXT"],
+    ["reviewed_at", "ALTER TABLE insurance_policies ADD COLUMN reviewed_at TEXT"],
+  ];
+  for (const [column, ddl] of insuranceColumns) addColumnIfMissing("insurance_policies", column, ddl);
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS financial_snapshots (
+      id TEXT PRIMARY KEY,
+      snapshot_date TEXT NOT NULL UNIQUE,
+      total_assets REAL NOT NULL,
+      total_liabilities REAL NOT NULL,
+      net_worth REAL NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_financial_snapshots_date ON financial_snapshots(snapshot_date);
+    CREATE TABLE IF NOT EXISTS financial_diagnosis_analyses (
+      id TEXT PRIMARY KEY,
+      as_of_date TEXT NOT NULL UNIQUE,
+      analysis TEXT NOT NULL,
+      snapshot TEXT NOT NULL,
+      generated_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_financial_diagnosis_analyses_date ON financial_diagnosis_analyses(as_of_date);
+    CREATE TABLE IF NOT EXISTS insurance_attachments (
+      id TEXT PRIMARY KEY,
+      policy_id TEXT NOT NULL REFERENCES insurance_policies(id),
+      type TEXT NOT NULL DEFAULT 'other',
+      file_path TEXT NOT NULL,
+      original_file_name TEXT,
+      caption TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_insurance_attachments_policy ON insurance_attachments(policy_id);
+    CREATE TABLE IF NOT EXISTS annual_projects (
+      id TEXT PRIMARY KEY,
+      year INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      budget_amount REAL NOT NULL,
+      start_date TEXT,
+      end_date TEXT,
+      keywords TEXT,
+      note TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_annual_projects_year ON annual_projects(year);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_annual_projects_year_name ON annual_projects(year, name);
+    CREATE TABLE IF NOT EXISTS monthly_budgets (
+      id TEXT PRIMARY KEY,
+      month TEXT NOT NULL UNIQUE,
+      total_amount REAL NOT NULL,
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS monthly_budget_items (
+      id TEXT PRIMARY KEY,
+      budget_id TEXT NOT NULL REFERENCES monthly_budgets(id),
+      category_id TEXT NOT NULL REFERENCES categories(id),
+      amount REAL NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_monthly_budget_items_budget ON monthly_budget_items(budget_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_monthly_budget_items_budget_category ON monthly_budget_items(budget_id, category_id);
+    CREATE TABLE IF NOT EXISTS annual_budgets (
+      id TEXT PRIMARY KEY,
+      year INTEGER NOT NULL UNIQUE,
+      expected_income REAL NOT NULL DEFAULT 0,
+      regular_budget_amount REAL NOT NULL DEFAULT 0,
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS annual_budget_items (
+      id TEXT PRIMARY KEY,
+      budget_id TEXT NOT NULL REFERENCES annual_budgets(id),
+      category_id TEXT NOT NULL REFERENCES categories(id),
+      amount REAL NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_annual_budget_items_budget ON annual_budget_items(budget_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_annual_budget_items_budget_category ON annual_budget_items(budget_id, category_id);
+    CREATE TABLE IF NOT EXISTS pending_project_confirmations (
+      id TEXT PRIMARY KEY,
+      installation_id TEXT NOT NULL,
+      sender_id TEXT NOT NULL,
+      transaction_id TEXT NOT NULL REFERENCES transactions(id),
+      candidate_project_ids TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_pending_project_sender ON pending_project_confirmations(installation_id, sender_id);
+  `);
+  addColumnIfMissing(
+    "transactions",
+    "annual_project_id",
+    "ALTER TABLE transactions ADD COLUMN annual_project_id TEXT REFERENCES annual_projects(id)"
+  );
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_transactions_annual_project ON transactions(annual_project_id)");
 }
 
 async function start() {
@@ -327,6 +543,7 @@ async function start() {
       },
       tags: [
         { name: "analysis", description: "AI 财务分析" },
+        { name: "financial-diagnosis", description: "家庭财务诊断计算" },
         { name: "dashboard", description: "首页支出看板" },
       ],
     },
@@ -348,6 +565,7 @@ async function start() {
   await app.register(liabilityRoutes, { prefix: "/api/v1/liabilities" });
   await app.register(insuranceRoutes, { prefix: "/api/v1/insurance" });
   await app.register(netWorthRoutes, { prefix: "/api/v1/networth" });
+  await app.register(financialDiagnosisRoutes, { prefix: "/api/v1/financial-diagnosis" });
   await app.register(categoryRoutes, { prefix: "/api/v1/categories" });
   await app.register(accountRoutes, { prefix: "/api/v1/accounts" });
   await app.register(memberRoutes, { prefix: "/api/v1/members" });
@@ -355,6 +573,7 @@ async function start() {
   await app.register(messageRoutes, { prefix: "/api/v1/messages" });
   await app.register(healthCheckupRoutes, { prefix: "/api/v1/health/checkups" });
   await app.register(medicalVisitRoutes, { prefix: "/api/v1/health/visits" });
+  await app.register(budgetRoutes, { prefix: "/api/v1/budgets" });
 
   // Hub integration routes
   await app.register(hubWebhookRoutes, { prefix: "/hub" });

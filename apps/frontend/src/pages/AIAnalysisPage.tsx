@@ -4,8 +4,9 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "@/api/client";
 import { Markdown } from "@/components/Markdown";
 import { getBusinessToday } from "@/lib/date";
+import { FinancialDiagnosisPanel } from "./FinancialDiagnosisPanel";
 import type { FinancialAnalysisResponse, FinancialAnalysisSummary } from "@caiwu/shared";
-import { AlertCircle, Brain, History, Loader2, RefreshCw } from "lucide-react";
+import { AlertCircle, Brain, History, Loader2, RefreshCw, WalletCards } from "lucide-react";
 
 function formatCurrency(value: number): string {
   return `¥${value.toFixed(2)}`;
@@ -24,6 +25,7 @@ function getDefaultMonth(): string {
 }
 
 export function AIAnalysisPage() {
+  const [mode, setMode] = useState<"monthly" | "diagnosis">("monthly");
   const [searchParams, setSearchParams] = useSearchParams();
   const [month, setMonth] = useState(searchParams.get("month") || getDefaultMonth());
   const [result, setResult] = useState<FinancialAnalysisResponse | null>(null);
@@ -95,8 +97,16 @@ export function AIAnalysisPage() {
     }
   };
 
+  if (mode === "diagnosis") {
+    return <div className="space-y-5">
+      <AnalysisModeTabs mode={mode} onChange={setMode} />
+      <FinancialDiagnosisPanel />
+    </div>;
+  }
+
   return (
     <div className="space-y-5">
+      <AnalysisModeTabs mode={mode} onChange={setMode} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-xl font-bold">AI 分析</h2>
@@ -210,6 +220,37 @@ export function AIAnalysisPage() {
               tone={result.snapshot.expenseChangeAmount > 0 ? "danger" : "default"}
             />
             <SummaryCard label="资产记录" value={`${result.snapshot.assetSummary.length} 类`} />
+            <SummaryCard
+              label="月度预算"
+              value={
+                result.snapshot.budgetSnapshot?.monthly?.budgetId
+                  ? formatCurrency(result.snapshot.budgetSnapshot.monthly.totalBudget)
+                  : "未设置"
+              }
+            />
+            <SummaryCard
+              label="预算执行率"
+              value={
+                result.snapshot.budgetSnapshot?.monthly?.executionRate == null
+                  ? "无法计算"
+                  : `${result.snapshot.budgetSnapshot.monthly.executionRate}%`
+              }
+              tone={
+                (result.snapshot.budgetSnapshot?.monthly?.executionRate || 0) >= 100
+                  ? "danger"
+                  : "default"
+              }
+            />
+            <SummaryCard
+              label="预算外支出"
+              value={formatCurrency(result.snapshot.budgetSnapshot?.monthly?.outsideBudgetActual || 0)}
+              tone={(result.snapshot.budgetSnapshot?.monthly?.outsideBudgetActual || 0) > 0 ? "danger" : "default"}
+            />
+            <SummaryCard
+              label="预算预警"
+              value={`${result.snapshot.budgetSnapshot?.monthly?.warningCount || 0} 项`}
+              tone={(result.snapshot.budgetSnapshot?.monthly?.warningCount || 0) > 0 ? "danger" : "default"}
+            />
           </div>
 
           <div className="rounded-lg border bg-card p-4 sm:p-5">
@@ -306,6 +347,13 @@ export function AIAnalysisPage() {
       )}
     </div>
   );
+}
+
+function AnalysisModeTabs({ mode, onChange }: { mode: "monthly" | "diagnosis"; onChange: (mode: "monthly" | "diagnosis") => void }) {
+  return <div className="flex flex-wrap gap-2 rounded-lg border bg-card p-2">
+    <button onClick={() => onChange("monthly")} className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm ${mode === "monthly" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}><Brain className="h-4 w-4" />月度消费分析</button>
+    <button onClick={() => onChange("diagnosis")} className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm ${mode === "diagnosis" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}><WalletCards className="h-4 w-4" />资产配置诊断</button>
+  </div>;
 }
 
 function SummaryCard({

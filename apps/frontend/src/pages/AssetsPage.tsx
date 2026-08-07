@@ -26,6 +26,10 @@ export function AssetsPage() {
         <p className="mt-1 text-sm text-muted-foreground">资产负债总览、配置分析与投资收益</p>
       </div>
 
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        资产金额是手工盘点值，目前不会随记账管理中的收入、支出或转账自动变化。建议每月按银行或投资账户的真实余额更新一次估值。
+      </div>
+
       <div className="flex flex-wrap gap-2 border-b">
         {TABS.map((t) => (
           <button
@@ -43,7 +47,7 @@ export function AssetsPage() {
       {tab === "overview" && <OverviewTab refreshKey={refreshKey} />}
       {tab === "assets" && <AssetsTab onChanged={bumpRefresh} />}
       {tab === "liabilities" && <LiabilitiesTab onChanged={bumpRefresh} />}
-      {tab === "insurance" && <InsuranceTab />}
+      {tab === "insurance" && <InsuranceTab onChanged={bumpRefresh} />}
     </div>
   );
 }

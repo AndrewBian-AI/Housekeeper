@@ -15,6 +15,10 @@ import { assets, categories, financialAnalyses, members, transactions } from "..
 import { getMonthDateRange, getPreviousMonth } from "../utils/date.js";
 import { chat } from "./deepseek.js";
 import { getFinancialAnalysisPrompt } from "./prompts.js";
+import {
+  getAnnualBudgetExecution,
+  getMonthlyBudgetExecution,
+} from "../budgets/service.js";
 
 function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
@@ -335,6 +339,14 @@ function buildAnalysisMessage(snapshot: FinancialAnalysisSnapshot): string {
   const assetLines = snapshot.assetSummary
     .map((item) => `- ${item.type}: ${item.totalAmount.toFixed(2)} 元，${item.count} 项`)
     .join("\n");
+  const monthlyBudget = snapshot.budgetSnapshot?.monthly;
+  const annualBudget = snapshot.budgetSnapshot?.annual;
+  const budgetLines = monthlyBudget
+    ? `月度日常预算 ${monthlyBudget.totalBudget.toFixed(2)} 元，日常实际支出 ${monthlyBudget.dailyActual.toFixed(2)} 元，执行率 ${
+        monthlyBudget.executionRate === null ? "未设置" : `${monthlyBudget.executionRate}%`
+      }，预算外支出 ${monthlyBudget.outsideBudgetActual.toFixed(2)} 元，年度专项当月支出 ${monthlyBudget.specialProjectActual.toFixed(2)} 元，预警 ${monthlyBudget.warningCount} 项。
+年度预计收入 ${annualBudget?.expectedIncome.toFixed(2) || "0.00"} 元，年度总预算 ${annualBudget?.totalBudget.toFixed(2) || "0.00"} 元，年度预计结余 ${annualBudget?.projectedSurplus.toFixed(2) || "0.00"} 元；当前实际收入 ${annualBudget?.actualIncome.toFixed(2) || "0.00"} 元、实际支出 ${annualBudget?.totalActual.toFixed(2) || "0.00"} 元。`
+    : "本月尚未设置预算，请明确说明无法评价预算执行情况，不要编造预算结论。";
 
   return `${snapshot.month} 家庭财务分析数据
 周期：${snapshot.period}
@@ -364,7 +376,10 @@ ${topTransactionLines || "- 暂无大额支出数据"}
 ${recurringLines || "- 暂无明显重复消费"}
 
 当前已录入资产/固定项：
-${assetLines || "- 暂无资产数据"}`;
+${assetLines || "- 暂无资产数据"}
+
+预算执行：
+${budgetLines}`;
 }
 
 export async function generateFinancialAnalysis(month: string): Promise<FinancialAnalysisResponse> {
@@ -387,6 +402,10 @@ export async function generateFinancialAnalysis(month: string): Promise<Financia
   const topTransactions = getTopTransactions(start, end);
   const recurringCandidates = getRecurringCandidates(start, end);
   const assetSummary = getAssetSummary();
+  const budgetSnapshot = {
+    monthly: getMonthlyBudgetExecution(normalizedMonth),
+    annual: getAnnualBudgetExecution(Number(normalizedMonth.slice(0, 4))),
+  };
   const expenseTransactionCount = expenseSummary.count;
   const expenseChangeAmount = roundMoney(totalExpense - previousMonthExpense);
 
@@ -408,6 +427,7 @@ export async function generateFinancialAnalysis(month: string): Promise<Financia
     topTransactions,
     recurringCandidates,
     assetSummary,
+    budgetSnapshot,
   };
 
   const analysis = (await chat(getFinancialAnalysisPrompt(), buildAnalysisMessage(snapshot))).trim();
@@ -455,6 +475,7 @@ function normalizeFinancialAnalysisSnapshot(
       typeof rawSnapshot.incomeTransactionCount === "number"
         ? rawSnapshot.incomeTransactionCount
         : null,
+    budgetSnapshot: rawSnapshot.budgetSnapshot || null,
   };
 }
 
