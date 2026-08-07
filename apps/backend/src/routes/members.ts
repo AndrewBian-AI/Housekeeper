@@ -14,6 +14,17 @@ import {
 import { authGuard } from "../middleware/auth.js";
 
 type MemberTableName = "transactions" | "assets" | "liabilities" | "health_checkups" | "medical_visits";
+type MemberRelationship = "self" | "spouse" | "child" | "parent" | "other";
+type MemberIncomeRole = "primary" | "secondary" | "none";
+
+interface MemberBody {
+  name?: string;
+  role?: string;
+  relationship?: MemberRelationship | null;
+  birthDate?: string | null;
+  incomeRole?: MemberIncomeRole | null;
+  isFinancialDependent?: boolean | null;
+}
 
 function countRows(tableName: MemberTableName, memberId: string) {
   const row = sqlite
@@ -58,6 +69,33 @@ function validRole(role: unknown): role is "admin" | "member" {
   return role === "admin" || role === "member";
 }
 
+function validRelationship(value: unknown): value is MemberRelationship | null {
+  return value === null || ["self", "spouse", "child", "parent", "other"].includes(String(value));
+}
+
+function validIncomeRole(value: unknown): value is MemberIncomeRole | null {
+  return value === null || ["primary", "secondary", "none"].includes(String(value));
+}
+
+function validBirthDate(value: unknown): value is string | null {
+  if (value === null || value === "") return true;
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value && value <= new Date().toISOString().slice(0, 10);
+}
+
+function validateProfile(body: MemberBody) {
+  if (body.relationship !== undefined && !validRelationship(body.relationship)) return "与本人的关系无效";
+  if (body.birthDate !== undefined && !validBirthDate(body.birthDate)) return "出生日期无效或晚于今天";
+  if (body.incomeRole !== undefined && !validIncomeRole(body.incomeRole)) return "家庭收入角色无效";
+  if (
+    body.isFinancialDependent !== undefined &&
+    body.isFinancialDependent !== null &&
+    typeof body.isFinancialDependent !== "boolean"
+  ) return "经济依赖状态无效";
+  return null;
+}
+
 export async function memberRoutes(app: FastifyInstance) {
   app.addHook("preHandler", authGuard);
 
@@ -69,12 +107,14 @@ export async function memberRoutes(app: FastifyInstance) {
   });
 
   // 手动新增成员（用于尚未绑定微信的家庭成员）。
-  app.post<{ Body: { name?: string; role?: string } }>("/", async (request, reply) => {
+  app.post<{ Body: MemberBody }>("/", async (request, reply) => {
     const name = request.body.name?.trim();
     if (!name) return reply.status(400).send({ error: "成员名称不能为空" });
     if (request.body.role !== undefined && !validRole(request.body.role)) {
       return reply.status(400).send({ error: "成员角色无效" });
     }
+    const profileError = validateProfile(request.body);
+    if (profileError) return reply.status(400).send({ error: profileError });
     const id = nanoid();
     const ts = new Date().toISOString();
     db.insert(members)
@@ -83,6 +123,10 @@ export async function memberRoutes(app: FastifyInstance) {
         wechatUserId: null,
         name,
         role: request.body.role === "admin" ? "admin" : "member",
+        relationship: request.body.relationship ?? null,
+        birthDate: request.body.birthDate || null,
+        incomeRole: request.body.incomeRole ?? null,
+        isFinancialDependent: request.body.isFinancialDependent ?? null,
         isActive: true,
         mergedIntoMemberId: null,
         createdAt: ts,
@@ -147,6 +191,13 @@ export async function memberRoutes(app: FastifyInstance) {
           .set({
             wechatUserId: targetWechatUserId,
             role: targetRole,
+            relationship: target.relationship || source.relationship || null,
+            birthDate: target.birthDate || source.birthDate || null,
+            incomeRole: target.incomeRole || source.incomeRole || null,
+            isFinancialDependent:
+              target.isFinancialDependent === null
+                ? source.isFinancialDependent
+                : target.isFinancialDependent,
             isActive: true,
             updatedAt: now,
           })
@@ -243,12 +294,15 @@ export async function memberRoutes(app: FastifyInstance) {
     }
   );
 
-  app.put<{ Params: { id: string }; Body: { name?: string; role?: string } }>(
+  app.put<{ Params: { id: string }; Body: MemberBody }>(
     "/:id",
     async (request, reply) => {
       const existing = db.select().from(members).where(eq(members.id, request.params.id)).get();
       if (!existing) return reply.status(404).send({ error: "成员不存在" });
       if (existing.mergedIntoMemberId) return reply.status(400).send({ error: "已合并成员不能再编辑" });
+
+      const profileError = validateProfile(request.body);
+      if (profileError) return reply.status(400).send({ error: profileError });
 
       const updates: Record<string, unknown> = {};
       if (request.body.name !== undefined) {
@@ -275,6 +329,12 @@ export async function memberRoutes(app: FastifyInstance) {
           }
         }
         updates.role = request.body.role;
+      }
+      if (request.body.relationship !== undefined) updates.relationship = request.body.relationship;
+      if (request.body.birthDate !== undefined) updates.birthDate = request.body.birthDate || null;
+      if (request.body.incomeRole !== undefined) updates.incomeRole = request.body.incomeRole;
+      if (request.body.isFinancialDependent !== undefined) {
+        updates.isFinancialDependent = request.body.isFinancialDependent;
       }
       updates.updatedAt = new Date().toISOString();
       db.update(members).set(updates).where(eq(members.id, existing.id)).run();

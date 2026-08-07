@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { db } from "../db/connection.js";
-import { insuranceAttachments, insurancePolicies } from "../db/schema.js";
+import { insuranceAttachments, insurancePolicies, members } from "../db/schema.js";
 import { eq, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { authGuard } from "../middleware/auth.js";
@@ -27,22 +27,50 @@ interface InsuranceBody {
   category: string;
   insuredMemberId?: string | null;
   policyholderMemberId?: string | null;
-  policyNumber?: string;
-  insurer?: string;
-  coverageAmount?: number;
-  premium?: number;
-  premiumFrequency?: string;
-  cashValue?: number;
-  startDate?: string;
-  endDate?: string;
-  claimPhone?: string;
-  claimContact?: string;
-  claimContactPhone?: string;
-  claimChannels?: string;
-  claimSteps?: string;
-  claimMaterials?: string;
-  claimNotes?: string;
-  note?: string;
+  policyNumber?: string | null;
+  insurer?: string | null;
+  coverageAmount?: number | null;
+  premium?: number | null;
+  premiumFrequency?: string | null;
+  cashValue?: number | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  coverageSummary?: string | null;
+  coverageTerm?: string | null;
+  deductible?: number | null;
+  reimbursementRatio?: number | null;
+  waitingPeriodDays?: number | null;
+  renewalType?: string | null;
+  renewalUntilAge?: number | null;
+  annualLimit?: number | null;
+  beneficiary?: string | null;
+  keyClauses?: string | null;
+  keyExclusions?: string | null;
+  reviewedAt?: string | null;
+  claimPhone?: string | null;
+  claimContact?: string | null;
+  claimContactPhone?: string | null;
+  claimChannels?: string | null;
+  claimSteps?: string | null;
+  claimMaterials?: string | null;
+  claimNotes?: string | null;
+  note?: string | null;
+}
+
+const RENEWAL_TYPES = ["guaranteed", "review_required", "non_guaranteed", "not_applicable", "unknown"] as const;
+
+function validateOptionalInteger(value: unknown, label: string, maximum: number) {
+  if (value === undefined || value === null || value === "") return null;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= maximum
+    ? null
+    : `${label}必须是0至${maximum}之间的整数`;
+}
+
+function validateOptionalRatio(value: unknown, label: string) {
+  if (value === undefined || value === null || value === "") return null;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100
+    ? null
+    : `${label}必须是0至100之间的数字`;
 }
 
 async function collectOneFile(request: FastifyRequest) {
@@ -95,9 +123,18 @@ function validateInsuranceBody(
     validateNonNegative(body.coverageAmount, "保额"),
     validateNonNegative(body.premium, "保费"),
     validateNonNegative(body.cashValue, "现金价值"),
+    validateNonNegative(body.deductible, "免赔额"),
+    validateNonNegative(body.annualLimit, "年度赔付限额"),
+    validateOptionalRatio(body.reimbursementRatio, "赔付比例"),
+    validateOptionalInteger(body.waitingPeriodDays, "等待期", 3650),
+    validateOptionalInteger(body.renewalUntilAge, "可续保年龄", 150),
+    body.renewalType === undefined || body.renewalType === null || body.renewalType === ""
+      ? null
+      : validateEnum(body.renewalType, RENEWAL_TYPES, "续保条件"),
     frequencyError,
     validateDate(body.startDate, "保险开始日期"),
     validateDate(body.endDate, "保险结束日期"),
+    validateDate(body.reviewedAt, "资料核对日期"),
     dateOrderError
   );
 }
@@ -113,6 +150,52 @@ export async function insuranceRoutes(app: FastifyInstance) {
     if (isActive !== undefined) conditions.push(eq(insurancePolicies.isActive, isActive === "true"));
     const where = conditions.length > 0 ? and(...conditions) : undefined;
     return db.select().from(insurancePolicies).where(where).all();
+  });
+
+  // 只检查诊断所需资料是否具备，不根据缺失项推断保障充足或不足。
+  app.get("/readiness", async () => {
+    const activeMembers = db.select().from(members).where(eq(members.isActive, true)).all();
+    const activePolicies = db.select().from(insurancePolicies).where(eq(insurancePolicies.isActive, true)).all();
+    const memberRows = activeMembers.map((member) => {
+      const policies = activePolicies.filter((policy) => policy.insuredMemberId === member.id);
+      const profileMissing = [
+        !member.relationship && "与本人关系",
+        !member.birthDate && "出生日期",
+        !member.incomeRole && "家庭收入角色",
+        member.isFinancialDependent === null && "经济依赖情况",
+      ].filter((value): value is string => Boolean(value));
+      const policyMissing = policies.flatMap((policy) => {
+        const missing = [
+          !policy.coverageSummary && "保障责任摘要",
+          policy.coverageAmount === null && "保额",
+          !policy.reviewedAt && "资料核对日期",
+        ];
+        if (policy.category === "medical") {
+          missing.push(
+            policy.deductible === null && "免赔额",
+            policy.reimbursementRatio === null && "赔付比例",
+            !policy.renewalType && "续保条件"
+          );
+        }
+        return missing
+          .filter((value): value is string => Boolean(value))
+          .map((field) => ({ policyId: policy.id, policyName: policy.name, field }));
+      });
+      return {
+        memberId: member.id,
+        memberName: member.name,
+        profileMissing,
+        policyCount: policies.length,
+        categories: [...new Set(policies.map((policy) => policy.category))],
+        policyMissing,
+      };
+    });
+    return {
+      memberCount: memberRows.length,
+      policyCount: activePolicies.length,
+      unassignedPolicyCount: activePolicies.filter((policy) => !policy.insuredMemberId).length,
+      members: memberRows,
+    };
   });
 
   app.get<{ Params: { id: string } }>("/:id", async (request, reply) => {
@@ -144,6 +227,18 @@ export async function insuranceRoutes(app: FastifyInstance) {
         cashValue: body.cashValue ?? null,
         startDate: body.startDate ?? null,
         endDate: body.endDate ?? null,
+        coverageSummary: body.coverageSummary ?? null,
+        coverageTerm: body.coverageTerm ?? null,
+        deductible: body.deductible ?? null,
+        reimbursementRatio: body.reimbursementRatio ?? null,
+        waitingPeriodDays: body.waitingPeriodDays ?? null,
+        renewalType: body.renewalType ?? null,
+        renewalUntilAge: body.renewalUntilAge ?? null,
+        annualLimit: body.annualLimit ?? null,
+        beneficiary: body.beneficiary ?? null,
+        keyClauses: body.keyClauses ?? null,
+        keyExclusions: body.keyExclusions ?? null,
+        reviewedAt: body.reviewedAt ?? null,
         claimPhone: body.claimPhone ?? null,
         claimContact: body.claimContact ?? null,
         claimContactPhone: body.claimContactPhone ?? null,
@@ -189,6 +284,18 @@ export async function insuranceRoutes(app: FastifyInstance) {
       "cashValue",
       "startDate",
       "endDate",
+      "coverageSummary",
+      "coverageTerm",
+      "deductible",
+      "reimbursementRatio",
+      "waitingPeriodDays",
+      "renewalType",
+      "renewalUntilAge",
+      "annualLimit",
+      "beneficiary",
+      "keyClauses",
+      "keyExclusions",
+      "reviewedAt",
       "claimPhone",
       "claimContact",
       "claimContactPhone",

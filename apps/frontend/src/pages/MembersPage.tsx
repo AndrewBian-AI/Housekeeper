@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api } from "@/api/client";
-import type { MemberWithUsage } from "@caiwu/shared";
+import type { MemberIncomeRole, MemberRelationship, MemberWithUsage } from "@caiwu/shared";
 import {
   Archive,
   Edit2,
@@ -10,9 +10,38 @@ import {
   Trash2,
   Unlink,
   UserPlus,
+  UserRoundCog,
 } from "lucide-react";
 
 const ROLE_LABELS: Record<string, string> = { admin: "管理员", member: "成员" };
+const RELATIONSHIP_LABELS: Record<MemberRelationship, string> = {
+  self: "本人",
+  spouse: "配偶",
+  child: "子女",
+  parent: "父母",
+  other: "其他",
+};
+const INCOME_ROLE_LABELS: Record<MemberIncomeRole, string> = {
+  primary: "主要收入贡献者",
+  secondary: "其他收入贡献者",
+  none: "暂无收入",
+};
+const emptyProfileForm = {
+  relationship: "" as MemberRelationship | "",
+  birthDate: "",
+  incomeRole: "" as MemberIncomeRole | "",
+  financialDependency: "unknown" as "unknown" | "yes" | "no",
+};
+
+function profileSummary(member: MemberWithUsage) {
+  const values = [
+    member.relationship ? RELATIONSHIP_LABELS[member.relationship] : null,
+    member.birthDate || null,
+    member.incomeRole ? INCOME_ROLE_LABELS[member.incomeRole] : null,
+    member.isFinancialDependent === true ? "经济依赖家庭" : member.isFinancialDependent === false ? "经济独立" : null,
+  ].filter(Boolean);
+  return values.length ? values.join(" · ") : "尚未配置";
+}
 
 function usageTotal(member: MemberWithUsage) {
   return Object.values(member.usage).reduce((sum, count) => sum + count, 0);
@@ -38,12 +67,14 @@ export function MembersPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", role: "member" });
   const [showCreate, setShowCreate] = useState(false);
-  const [createForm, setCreateForm] = useState({ name: "", role: "member" });
+  const [createForm, setCreateForm] = useState({ name: "", role: "member", ...emptyProfileForm });
   const [saving, setSaving] = useState(false);
   const [mergeSource, setMergeSource] = useState<MemberWithUsage | null>(null);
   const [mergeTargetId, setMergeTargetId] = useState("");
   const [bindingMember, setBindingMember] = useState<MemberWithUsage | null>(null);
   const [wechatUserId, setWechatUserId] = useState("");
+  const [profileMember, setProfileMember] = useState<MemberWithUsage | null>(null);
+  const [profileForm, setProfileForm] = useState(emptyProfileForm);
 
   useEffect(() => { void loadData(); }, []);
 
@@ -94,9 +125,20 @@ export function MembersPage() {
 
   const handleCreate = async () => {
     if (!createForm.name.trim()) return;
-    if (await run(() => api.post("/members", createForm))) {
+    const body = {
+      name: createForm.name,
+      role: createForm.role,
+      relationship: createForm.relationship || null,
+      birthDate: createForm.birthDate || null,
+      incomeRole: createForm.incomeRole || null,
+      isFinancialDependent:
+        createForm.financialDependency === "unknown"
+          ? null
+          : createForm.financialDependency === "yes",
+    };
+    if (await run(() => api.post("/members", body))) {
       setShowCreate(false);
-      setCreateForm({ name: "", role: "member" });
+      setCreateForm({ name: "", role: "member", ...emptyProfileForm });
     }
   };
 
@@ -142,6 +184,31 @@ export function MembersPage() {
     }
   };
 
+  const openProfile = (member: MemberWithUsage) => {
+    setProfileMember(member);
+    setProfileForm({
+      relationship: member.relationship || "",
+      birthDate: member.birthDate || "",
+      incomeRole: member.incomeRole || "",
+      financialDependency:
+        member.isFinancialDependent === null ? "unknown" : member.isFinancialDependent ? "yes" : "no",
+    });
+  };
+
+  const saveProfile = async () => {
+    if (!profileMember) return;
+    const body = {
+      relationship: profileForm.relationship || null,
+      birthDate: profileForm.birthDate || null,
+      incomeRole: profileForm.incomeRole || null,
+      isFinancialDependent:
+        profileForm.financialDependency === "unknown"
+          ? null
+          : profileForm.financialDependency === "yes",
+    };
+    if (await run(() => api.put(`/members/${profileMember.id}`, body))) setProfileMember(null);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -175,20 +242,21 @@ export function MembersPage() {
 
       <div className="overflow-hidden rounded-lg border bg-card">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-sm">
+          <table className="w-full min-w-[1160px] text-sm">
             <thead><tr className="border-b bg-muted/50">
               <th className="px-4 py-3 text-left">名称</th>
               <th className="px-4 py-3 text-left">角色</th>
               <th className="px-4 py-3 text-left">状态</th>
               <th className="px-4 py-3 text-left">微信</th>
+              <th className="px-4 py-3 text-left">家庭基础资料</th>
               <th className="px-4 py-3 text-left">关联数据</th>
               <th className="px-4 py-3 text-right">操作</th>
             </tr></thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} className="py-8 text-center text-muted-foreground">加载中...</td></tr>
+                <tr><td colSpan={7} className="py-8 text-center text-muted-foreground">加载中...</td></tr>
               ) : visibleMembers.length === 0 ? (
-                <tr><td colSpan={6} className="py-8 text-center text-muted-foreground">暂无成员</td></tr>
+                <tr><td colSpan={7} className="py-8 text-center text-muted-foreground">暂无成员</td></tr>
               ) : visibleMembers.map((member) => {
                 const canDelete = usageTotal(member) === 0 && !member.wechatUserId && !member.mergedIntoMemberId;
                 return (
@@ -211,6 +279,7 @@ export function MembersPage() {
                       ) : <span className={`rounded px-2 py-0.5 text-xs ${member.isActive ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}`}>{member.isActive ? "生效中" : "已归档"}</span>}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{member.wechatUserId ? "已绑定" : "未绑定"}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{profileSummary(member)}</td>
                     <td className="px-4 py-3 text-muted-foreground">{usageText(member)}</td>
                     <td className="px-4 py-3">
                       {editingId === member.id ? (
@@ -221,6 +290,7 @@ export function MembersPage() {
                       ) : (
                         <div className="flex flex-wrap justify-end gap-1">
                           {!member.mergedIntoMemberId && <button onClick={() => handleEdit(member)} className="flex items-center gap-1 rounded border px-2 py-1 text-xs" title="编辑"><Edit2 className="h-3.5 w-3.5" /> 编辑</button>}
+                          {!member.mergedIntoMemberId && <button onClick={() => openProfile(member)} className="flex items-center gap-1 rounded border px-2 py-1 text-xs" title="配置保障诊断所需的家庭基础资料"><UserRoundCog className="h-3.5 w-3.5" /> 资料</button>}
                           {!member.mergedIntoMemberId && member.isActive && <button onClick={() => openBinding(member)} className="flex items-center gap-1 rounded border px-2 py-1 text-xs" title={member.wechatUserId ? "管理微信绑定" : "绑定微信"}>{member.wechatUserId ? <Unlink className="h-3.5 w-3.5" /> : <Link2 className="h-3.5 w-3.5" />} 微信</button>}
                           {!member.mergedIntoMemberId && <button onClick={() => openMerge(member)} className="flex items-center gap-1 rounded border px-2 py-1 text-xs" title="合并成员"><Merge className="h-3.5 w-3.5" /> 合并</button>}
                           {!member.mergedIntoMemberId && <button onClick={() => changeStatus(member)} className="flex items-center gap-1 rounded border px-2 py-1 text-xs" title={member.isActive ? "归档" : "恢复"}>{member.isActive ? <Archive className="h-3.5 w-3.5" /> : <RotateCcw className="h-3.5 w-3.5" />}{member.isActive ? "归档" : "恢复"}</button>}
@@ -240,6 +310,7 @@ export function MembersPage() {
         <Modal title="新增成员" onClose={() => setShowCreate(false)}>
           <Field label="名称 *"><input value={createForm.name} onChange={(event) => setCreateForm({ ...createForm, name: event.target.value })} placeholder="如：家庭成员姓名" className="w-full rounded-md border px-3 py-2 text-sm" /></Field>
           <Field label="角色"><select value={createForm.role} onChange={(event) => setCreateForm({ ...createForm, role: event.target.value })} className="w-full rounded-md border px-3 py-2 text-sm"><option value="member">成员</option><option value="admin">管理员</option></select></Field>
+          <ProfileFields value={createForm} onChange={setCreateForm} />
           <p className="text-xs text-muted-foreground">手动新增的成员默认没有微信绑定，可用于记账、资产、保险和健康档案归属。</p>
           <ModalActions onCancel={() => setShowCreate(false)} onConfirm={handleCreate} saving={saving} />
         </Modal>
@@ -265,6 +336,16 @@ export function MembersPage() {
           <ModalActions onCancel={() => setBindingMember(null)} onConfirm={saveBinding} saving={saving} confirmLabel={wechatUserId.trim() ? "保存绑定" : "确认解绑"} />
         </Modal>
       )}
+
+      {profileMember && (
+        <Modal title={`家庭基础资料：${profileMember.name}`} onClose={() => setProfileMember(null)}>
+          <div className="rounded-md bg-blue-50 p-3 text-xs text-blue-800">
+            这些资料用于后续按家庭成员评估保障覆盖。全部为非必填；未配置时系统只会提示资料不足，不会推断保障不足。
+          </div>
+          <ProfileFields value={profileForm} onChange={setProfileForm} />
+          <ModalActions onCancel={() => setProfileMember(null)} onConfirm={saveProfile} saving={saving} />
+        </Modal>
+      )}
     </div>
   );
 }
@@ -275,6 +356,29 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return <div><label className="mb-1 block text-sm text-muted-foreground">{label}</label>{children}</div>;
+}
+
+function ProfileFields<T extends typeof emptyProfileForm>({ value, onChange }: { value: T; onChange: (value: T) => void }) {
+  return <div className="grid gap-3 sm:grid-cols-2">
+    <Field label="与本人的关系（可选）">
+      <select value={value.relationship} onChange={(event) => onChange({ ...value, relationship: event.target.value as MemberRelationship | "" })} className="w-full rounded-md border px-3 py-2 text-sm">
+        <option value="">未配置</option>
+        {(Object.keys(RELATIONSHIP_LABELS) as MemberRelationship[]).map((key) => <option key={key} value={key}>{RELATIONSHIP_LABELS[key]}</option>)}
+      </select>
+    </Field>
+    <Field label="出生日期（可选）"><input type="date" max={new Date().toISOString().slice(0, 10)} value={value.birthDate} onChange={(event) => onChange({ ...value, birthDate: event.target.value })} className="w-full rounded-md border px-3 py-2 text-sm" /></Field>
+    <Field label="家庭收入角色（可选）">
+      <select value={value.incomeRole} onChange={(event) => onChange({ ...value, incomeRole: event.target.value as MemberIncomeRole | "" })} className="w-full rounded-md border px-3 py-2 text-sm">
+        <option value="">未配置</option>
+        {(Object.keys(INCOME_ROLE_LABELS) as MemberIncomeRole[]).map((key) => <option key={key} value={key}>{INCOME_ROLE_LABELS[key]}</option>)}
+      </select>
+    </Field>
+    <Field label="经济上依赖家庭（可选）">
+      <select value={value.financialDependency} onChange={(event) => onChange({ ...value, financialDependency: event.target.value as "unknown" | "yes" | "no" })} className="w-full rounded-md border px-3 py-2 text-sm">
+        <option value="unknown">未配置</option><option value="yes">是</option><option value="no">否</option>
+      </select>
+    </Field>
+  </div>;
 }
 
 function ModalActions({ onCancel, onConfirm, saving, confirmLabel = "保存" }: { onCancel: () => void; onConfirm: () => void; saving: boolean; confirmLabel?: string }) {

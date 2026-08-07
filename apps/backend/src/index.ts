@@ -276,7 +276,7 @@ function initDatabase() {
   migratePlanningTables();
 }
 
-/** 成员身份治理：只增加归档与合并追踪字段，不改写现有成员或业务数据。 */
+/** 成员身份治理与保障诊断基础资料：只增列，不改写现有成员或业务数据。 */
 function migrateMembersTable() {
   addColumnIfMissing(
     "members",
@@ -287,6 +287,14 @@ function migrateMembersTable() {
     "members",
     "merged_into_member_id",
     "ALTER TABLE members ADD COLUMN merged_into_member_id TEXT"
+  );
+  addColumnIfMissing("members", "relationship", "ALTER TABLE members ADD COLUMN relationship TEXT");
+  addColumnIfMissing("members", "birth_date", "ALTER TABLE members ADD COLUMN birth_date TEXT");
+  addColumnIfMissing("members", "income_role", "ALTER TABLE members ADD COLUMN income_role TEXT");
+  addColumnIfMissing(
+    "members",
+    "is_financial_dependent",
+    "ALTER TABLE members ADD COLUMN is_financial_dependent INTEGER"
   );
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_members_active ON members(is_active)");
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_members_merged_into ON members(merged_into_member_id)");
@@ -343,6 +351,18 @@ function migratePlanningTables() {
     ["claim_steps", "ALTER TABLE insurance_policies ADD COLUMN claim_steps TEXT"],
     ["claim_materials", "ALTER TABLE insurance_policies ADD COLUMN claim_materials TEXT"],
     ["claim_notes", "ALTER TABLE insurance_policies ADD COLUMN claim_notes TEXT"],
+    ["coverage_summary", "ALTER TABLE insurance_policies ADD COLUMN coverage_summary TEXT"],
+    ["coverage_term", "ALTER TABLE insurance_policies ADD COLUMN coverage_term TEXT"],
+    ["deductible", "ALTER TABLE insurance_policies ADD COLUMN deductible REAL"],
+    ["reimbursement_ratio", "ALTER TABLE insurance_policies ADD COLUMN reimbursement_ratio REAL"],
+    ["waiting_period_days", "ALTER TABLE insurance_policies ADD COLUMN waiting_period_days INTEGER"],
+    ["renewal_type", "ALTER TABLE insurance_policies ADD COLUMN renewal_type TEXT"],
+    ["renewal_until_age", "ALTER TABLE insurance_policies ADD COLUMN renewal_until_age INTEGER"],
+    ["annual_limit", "ALTER TABLE insurance_policies ADD COLUMN annual_limit REAL"],
+    ["beneficiary", "ALTER TABLE insurance_policies ADD COLUMN beneficiary TEXT"],
+    ["key_clauses", "ALTER TABLE insurance_policies ADD COLUMN key_clauses TEXT"],
+    ["key_exclusions", "ALTER TABLE insurance_policies ADD COLUMN key_exclusions TEXT"],
+    ["reviewed_at", "ALTER TABLE insurance_policies ADD COLUMN reviewed_at TEXT"],
   ];
   for (const [column, ddl] of insuranceColumns) addColumnIfMissing("insurance_policies", column, ddl);
 

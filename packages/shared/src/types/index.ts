@@ -23,8 +23,16 @@ export type InsuranceCategory =
   | "other";
 export type AccountType = "cash" | "bank" | "alipay" | "wechat" | "credit" | "other";
 export type MemberRole = "admin" | "member";
+export type MemberRelationship = "self" | "spouse" | "child" | "parent" | "other";
+export type MemberIncomeRole = "primary" | "secondary" | "none";
 export type TransactionSource = "wechat" | "admin";
 export type AssetFrequency = "monthly" | "quarterly" | "yearly" | "one-time";
+export type InsuranceRenewalType =
+  | "guaranteed"
+  | "review_required"
+  | "non_guaranteed"
+  | "not_applicable"
+  | "unknown";
 
 export interface Member {
   id: string;
@@ -32,6 +40,10 @@ export interface Member {
   name: string;
   avatarUrl: string | null;
   role: MemberRole;
+  relationship: MemberRelationship | null;
+  birthDate: string | null;
+  incomeRole: MemberIncomeRole | null;
+  isFinancialDependent: boolean | null;
   isActive: boolean;
   mergedIntoMemberId: string | null;
   createdAt: string;
@@ -172,6 +184,18 @@ export interface InsurancePolicy {
   cashValue: number | null;
   startDate: string | null;
   endDate: string | null;
+  coverageSummary: string | null;
+  coverageTerm: string | null;
+  deductible: number | null;
+  reimbursementRatio: number | null;
+  waitingPeriodDays: number | null;
+  renewalType: InsuranceRenewalType | null;
+  renewalUntilAge: number | null;
+  annualLimit: number | null;
+  beneficiary: string | null;
+  keyClauses: string | null;
+  keyExclusions: string | null;
+  reviewedAt: string | null;
   claimPhone: string | null;
   claimContact: string | null;
   claimContactPhone: string | null;
