@@ -100,6 +100,20 @@ export const assetValuations = sqliteTable(
   ]
 );
 
+export const financialSnapshots = sqliteTable(
+  "financial_snapshots",
+  {
+    id: text("id").primaryKey(),
+    snapshotDate: text("snapshot_date").notNull(),
+    totalAssets: real("total_assets").notNull(),
+    totalLiabilities: real("total_liabilities").notNull(),
+    netWorth: real("net_worth").notNull(),
+    createdAt: text("created_at").notNull().default("(datetime('now'))"),
+    updatedAt: text("updated_at").notNull().default("(datetime('now'))"),
+  },
+  (table) => [uniqueIndex("idx_financial_snapshots_date").on(table.snapshotDate)]
+);
+
 export const liabilities = sqliteTable("liabilities", {
   id: text("id").primaryKey(),
   type: text("type").notNull(),

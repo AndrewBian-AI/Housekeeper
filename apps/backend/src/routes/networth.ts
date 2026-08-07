@@ -19,12 +19,13 @@ import {
   DEFAULT_TARGET_ALLOCATION,
 } from "@caiwu/shared";
 import type { FastifyInstance } from "fastify";
-import { and, eq, gte, lte, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
-import { assetValuations, assets, insurancePolicies, liabilities, members, settings, transactions } from "../db/schema.js";
+import { assets, financialSnapshots, insurancePolicies, liabilities, members, settings } from "../db/schema.js";
 import { authGuard } from "../middleware/auth.js";
 import { upsertSetting } from "../db/settings.js";
-import { getBusinessToday, normalizeDateString } from "../utils/date.js";
+import { getBusinessToday } from "../utils/date.js";
+import { buildFinancialDiagnosis } from "../diagnosis/service.js";
 
 const BUCKETS: AllocationBucket[] = ["liquid", "stable", "growth", "protection"];
 
@@ -78,20 +79,6 @@ function getInsuranceCashValue(): number {
 
 function getMemberNameMap(): Map<string, string> {
   return new Map(db.select().from(members).all().map((m) => [m.id, m.name]));
-}
-
-function monthStart(year: number, monthIndex: number): string {
-  return new Date(Date.UTC(year, monthIndex, 1)).toISOString().slice(0, 10);
-}
-
-function monthEnd(year: number, monthIndex: number): string {
-  return new Date(Date.UTC(year, monthIndex + 1, 0)).toISOString().slice(0, 10);
-}
-
-function monthsInclusive(start: string, end: string): number {
-  const [sy, sm] = start.slice(0, 7).split("-").map(Number);
-  const [ey, em] = end.slice(0, 7).split("-").map(Number);
-  return (ey - sy) * 12 + em - sm + 1;
 }
 
 export async function netWorthRoutes(app: FastifyInstance) {
@@ -290,130 +277,49 @@ export async function netWorthRoutes(app: FastifyInstance) {
     };
   });
 
-  // 净资产趋势：从估值快照聚合；负债无历史，按当前总额取平；总会追加「今天」一个点
+  // 家庭净资产趋势只使用本功能启用后形成的真实快照，不用当前负债/保险现金价值倒推历史。
+  // 单项资产的更早估值记录仍保留在资产明细中查看。
   app.get("/trend", async (): Promise<{ data: NetWorthTrendPoint[] }> => {
-    const assetList = db.select().from(assets).all();
-    const liabilityTotal = getActiveLiabilities().reduce((s, l) => s + (l.balance || 0), 0);
-    const insuranceCashValue = getInsuranceCashValue();
-    const valuations = db.select().from(assetValuations).orderBy(assetValuations.date).all();
-
     const today = getBusinessToday();
-    const dates = Array.from(new Set([...valuations.map((v) => v.date), today])).sort();
-
-    // 每个资产按日期排序的快照
-    const byAsset = new Map<string, { date: string; value: number }[]>();
-    for (const v of valuations) {
-      const arr = byAsset.get(v.assetId) ?? [];
-      arr.push({ date: v.date, value: v.value });
-      byAsset.set(v.assetId, arr);
-    }
-
-    const data: NetWorthTrendPoint[] = dates.map((d) => {
-      let totalAssets = insuranceCashValue;
-      for (const a of assetList) {
-        const snaps = byAsset.get(a.id);
-        if (d === today) {
-          if (a.isActive) totalAssets += a.amount || 0; // 今天只计入当前有效资产
-        } else if (snaps) {
-          const applicable = snaps.filter((s) => s.date <= d);
-          if (applicable.length > 0) totalAssets += applicable[applicable.length - 1].value;
-        }
-      }
-      return {
-        date: d,
-        totalAssets: roundMoney(totalAssets),
+    const data: NetWorthTrendPoint[] = db
+      .select()
+      .from(financialSnapshots)
+      .orderBy(asc(financialSnapshots.snapshotDate))
+      .all()
+      .map((snapshot) => ({
+        date: snapshot.snapshotDate,
+        totalAssets: roundMoney(snapshot.totalAssets),
+        totalLiabilities: roundMoney(snapshot.totalLiabilities),
+        netWorth: roundMoney(snapshot.netWorth),
+      }));
+    if (!data.some((point) => point.date === today)) {
+      const assetTotal = getActiveAssets().reduce((sum, asset) => sum + Number(asset.amount || 0), 0) + getInsuranceCashValue();
+      const liabilityTotal = getActiveLiabilities().reduce((sum, liability) => sum + Number(liability.balance || 0), 0);
+      data.push({
+        date: today,
+        totalAssets: roundMoney(assetTotal),
         totalLiabilities: roundMoney(liabilityTotal),
-        netWorth: roundMoney(totalAssets - liabilityTotal),
-      };
-    });
+        netWorth: roundMoney(assetTotal - liabilityTotal),
+      });
+    }
 
     return { data };
   });
 
   app.get("/emergency-fund", async (): Promise<EmergencyFundStat> => {
-    const assetList = getActiveAssets();
-    const liquidAssets = assetList
-      .filter((a) => (a.allocationBucket as AllocationBucket) === "liquid")
-      .reduce((s, a) => s + (a.amount || 0), 0);
-
-    const today = normalizeDateString(getBusinessToday())!;
-    const [currentYear, currentMonth, currentDay] = today.split("-").map(Number);
-    const completedEnd = monthEnd(currentYear, currentMonth - 2);
-    const windowStart = monthStart(currentYear, currentMonth - 7);
-
-    const completedExpense = db
-      .select({
-        total: sql<number>`coalesce(sum(amount), 0)`,
-        firstDate: sql<string | null>`min(transaction_date)`,
-      })
-      .from(transactions)
-      .where(
-        and(
-          eq(transactions.type, "expense"),
-          gte(transactions.transactionDate, windowStart),
-          lte(transactions.transactionDate, completedEnd)
-        )
-      )
-      .get();
-
-    let totalExpense = Number(completedExpense?.total || 0);
-    let sampleStart: string | null = completedExpense?.firstDate
-      ? `${completedExpense.firstDate.slice(0, 7)}-01`
-      : null;
-    let sampleEnd: string | null = completedExpense?.firstDate ? completedEnd : null;
-    let sampleMonths = sampleStart && sampleEnd ? monthsInclusive(sampleStart, sampleEnd) : 0;
-    let usesPartialMonth = false;
-
-    // 尚无完整月份时，临时展示当月数据，但明确标记样本不足。
-    if (sampleMonths === 0) {
-      const currentStart = monthStart(currentYear, currentMonth - 1);
-      const currentExpense = db
-        .select({ total: sql<number>`coalesce(sum(amount), 0)` })
-        .from(transactions)
-        .where(
-          and(
-            eq(transactions.type, "expense"),
-            gte(transactions.transactionDate, currentStart),
-            lte(transactions.transactionDate, today)
-          )
-        )
-        .get();
-      totalExpense = Number(currentExpense?.total || 0);
-      if (totalExpense > 0) {
-        sampleStart = currentStart;
-        sampleEnd = today;
-        sampleMonths = 1;
-        usesPartialMonth = currentDay < Number(monthEnd(currentYear, currentMonth - 1).slice(-2));
-      }
-    }
-
-    const averageMonthlyExpense = sampleMonths > 0 ? roundMoney(totalExpense / sampleMonths) : 0;
-
-    const targetMonths = getEmergencyMonths();
-    const targetAmount = roundMoney(averageMonthlyExpense * targetMonths);
-    const coverageMonths = averageMonthlyExpense > 0 ? roundMoney(liquidAssets / averageMonthlyExpense) : null;
-
-    let status: EmergencyFundStat["status"] = "unknown";
-    const dataQuality: EmergencyFundStat["dataQuality"] =
-      !usesPartialMonth && sampleMonths >= 3 ? "sufficient" : "insufficient";
-    if (dataQuality === "sufficient" && averageMonthlyExpense > 0 && coverageMonths != null) {
-      if (coverageMonths >= targetMonths) status = "sufficient";
-      else if (coverageMonths >= targetMonths * 0.5) status = "warning";
-      else status = "insufficient";
-    }
-
+    const liquidity = buildFinancialDiagnosis().liquidity;
     return {
-      liquidAssets: roundMoney(liquidAssets),
-      averageMonthlyExpense,
-      targetMonths,
-      targetAmount,
-      coverageMonths,
-      status,
-      sampleStart,
-      sampleEnd,
-      sampleMonths,
-      dataQuality,
-      usesPartialMonth,
+      liquidAssets: liquidity.liquidAssets,
+      averageMonthlyExpense: liquidity.plannedMonthlyRequirement,
+      targetMonths: liquidity.targetMonths,
+      targetAmount: liquidity.targetAmount,
+      coverageMonths: liquidity.coverageMonths,
+      status: liquidity.status,
+      sampleStart: null,
+      sampleEnd: null,
+      sampleMonths: liquidity.actualSampleMonths,
+      dataQuality: liquidity.dataQuality,
+      usesPartialMonth: liquidity.usesPartialMonth,
     };
   });
 }

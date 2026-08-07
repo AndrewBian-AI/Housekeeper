@@ -123,8 +123,8 @@ export function OverviewTab({ refreshKey }: { refreshKey: number }) {
             </ResponsiveContainer>
           ) : (
             <div className="flex h-[260px] flex-col items-center justify-center gap-1 text-center text-muted-foreground">
-              <p>趋势需要多次估值记录</p>
-              <p className="text-xs">在「资产」标签里点资产的趋势图标，定期记录市值即可形成曲线</p>
+              <p>当前仅有一个净资产数据点</p>
+              <p className="text-xs">不同日期进入「AI分析 → 资产配置诊断」后，系统会形成真实净资产趋势，不会倒推历史</p>
             </div>
           )}
         </div>
@@ -138,7 +138,7 @@ export function OverviewTab({ refreshKey }: { refreshKey: number }) {
                 <p className="text-xl font-bold">{formatCurrency(emergency.liquidAssets)}</p>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">月均支出</span>
+                <span className="text-muted-foreground">月度资金需求</span>
                 <span>{formatCurrency(emergency.averageMonthlyExpense)}</span>
               </div>
               <div className="flex justify-between text-sm">
@@ -159,7 +159,7 @@ export function OverviewTab({ refreshKey }: { refreshKey: number }) {
               )}
               {emergency.dataQuality === "insufficient" && (
                 <p className="rounded bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
-                  完整记账数据少于3个月，月均支出和覆盖月数仅供参考。
+                  月度预算、年度预算或历史日常支出依据不足，覆盖月数仅供参考。
                 </p>
               )}
             </div>

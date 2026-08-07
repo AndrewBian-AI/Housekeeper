@@ -167,11 +167,14 @@ export async function insuranceRoutes(app: FastifyInstance) {
       const policyMissing = policies.flatMap((policy) => {
         const missing = [
           !policy.coverageSummary && "保障责任摘要",
-          policy.coverageAmount === null && "保额",
           !policy.reviewedAt && "资料核对日期",
         ];
+        if (["life", "accident", "property"].includes(policy.category)) {
+          missing.push(policy.coverageAmount === null && "保额");
+        }
         if (policy.category === "medical") {
           missing.push(
+            policy.coverageAmount === null && policy.annualLimit === null && "保额或年度赔付限额",
             policy.deductible === null && "免赔额",
             policy.reimbursementRatio === null && "赔付比例",
             !policy.renewalType && "续保条件"

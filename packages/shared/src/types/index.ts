@@ -494,6 +494,144 @@ export interface AssetPreferences {
   emergencyFundMonths: number;
 }
 
+// ---- 家庭财务诊断（确定性计算，不含 AI 结论） ----
+
+export interface FinancialDiagnosisWarning {
+  code: string;
+  level: "info" | "warning";
+  message: string;
+}
+
+export interface NetWorthDiagnosis {
+  totalAssets: number;
+  totalLiabilities: number;
+  netWorth: number;
+  snapshotDate: string;
+  baselineDate: string;
+  baselineNetWorth: number;
+  changeAmount: number | null;
+  changeRate: number | null;
+  previousDate: string | null;
+  previousNetWorth: number | null;
+  previousChangeAmount: number | null;
+  historyStatus: "baseline_only" | "available";
+}
+
+export interface SavingsDiagnosis {
+  periodStart: string;
+  periodEnd: string;
+  actualIncome: number;
+  actualExpense: number;
+  netSavings: number;
+  savingsRate: number | null;
+  incomeTransactionCount: number;
+  expenseTransactionCount: number;
+  expectedAnnualIncome: number;
+  expectedIncomeProgressRate: number | null;
+  basis: "ledger_transactions";
+  assetValuationChangesExcluded: true;
+}
+
+export interface AllocationDiagnosisItem {
+  bucket: AllocationBucket;
+  label: string;
+  amount: number;
+  currentRatio: number;
+  targetRatio: number;
+  deviationPoints: number;
+  gapAmount: number;
+  status: "on_target" | "over" | "under";
+}
+
+export interface AllocationDiagnosis {
+  totalAssets: number;
+  deviationThresholdPoints: number;
+  maxAbsoluteDeviationPoints: number | null;
+  status: "on_target" | "deviated" | "unknown";
+  items: AllocationDiagnosisItem[];
+}
+
+export interface LiquidityDiagnosis {
+  liquidAssets: number;
+  regularMonthlyRequirement: number;
+  specialProjectMonthlyReserve: number;
+  plannedMonthlyRequirement: number;
+  coverageMonths: number | null;
+  targetMonths: number;
+  targetAmount: number;
+  gapAmount: number | null;
+  status: "sufficient" | "warning" | "insufficient" | "unknown";
+  regularBasis: "monthly_budget" | "annual_budget" | "actual_average" | "unavailable";
+  actualSampleMonths: number;
+  usesPartialMonth: boolean;
+  remainingSpecialBudget: number;
+  remainingMonths: number;
+  dataQuality: "sufficient" | "insufficient";
+}
+
+export interface InsuranceMemberDiagnosis {
+  memberId: string;
+  memberName: string;
+  relationship: MemberRelationship | null;
+  incomeRole: MemberIncomeRole | null;
+  isFinancialDependent: boolean | null;
+  policyCount: number;
+  categories: InsuranceCategory[];
+  coverageByCategory: Partial<Record<InsuranceCategory, number>>;
+  profileMissing: string[];
+  policyDataMissing: string[];
+}
+
+export interface InsuranceDiagnosis {
+  activeMemberCount: number;
+  activePolicyCount: number;
+  assignedPolicyCount: number;
+  membersWithPolicyCount: number;
+  recurringAnnualPremium: number;
+  premiumBurdenRate: number | null;
+  premiumIncomeBasis: "annual_budget_expected" | "unavailable";
+  unannualizedPremiumPolicyCount: number;
+  dataStatus: "ready" | "partial" | "missing";
+  adequacyConclusionAvailable: false;
+  members: InsuranceMemberDiagnosis[];
+}
+
+export interface DebtDiagnosis {
+  totalLiabilities: number;
+  totalAssets: number;
+  debtToAssetRatio: number | null;
+  monthlyPayment: number;
+  annualDebtServiceRate: number | null;
+  incomeBasis: "annual_budget_expected" | "unavailable";
+}
+
+export interface InvestmentDiagnosis {
+  trackedAssetCount: number;
+  missingCostBasisCount: number;
+  totalCost: number;
+  currentValue: number;
+  totalGain: number;
+  returnRate: number | null;
+}
+
+export interface FinancialDiagnosisReport {
+  generatedAt: string;
+  asOfDate: string;
+  year: number;
+  month: string;
+  netWorth: NetWorthDiagnosis;
+  savings: SavingsDiagnosis;
+  allocation: AllocationDiagnosis;
+  liquidity: LiquidityDiagnosis;
+  insurance: InsuranceDiagnosis;
+  debt: DebtDiagnosis;
+  investment: InvestmentDiagnosis;
+  monthlyBudget: MonthlyBudgetExecution;
+  annualBudget: AnnualBudgetExecution;
+  warnings: FinancialDiagnosisWarning[];
+  methodologyNotes: string[];
+}
+
 export interface FinancialAnalysisRequest {
   month: string;
 }

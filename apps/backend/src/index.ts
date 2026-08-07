@@ -16,6 +16,7 @@ import { assetRoutes } from "./routes/assets.js";
 import { liabilityRoutes } from "./routes/liabilities.js";
 import { insuranceRoutes } from "./routes/insurance.js";
 import { netWorthRoutes } from "./routes/networth.js";
+import { financialDiagnosisRoutes } from "./routes/financial-diagnosis.js";
 import { categoryRoutes } from "./routes/categories.js";
 import { accountRoutes } from "./routes/accounts.js";
 import { memberRoutes } from "./routes/members.js";
@@ -367,6 +368,16 @@ function migratePlanningTables() {
   for (const [column, ddl] of insuranceColumns) addColumnIfMissing("insurance_policies", column, ddl);
 
   sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS financial_snapshots (
+      id TEXT PRIMARY KEY,
+      snapshot_date TEXT NOT NULL UNIQUE,
+      total_assets REAL NOT NULL,
+      total_liabilities REAL NOT NULL,
+      net_worth REAL NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_financial_snapshots_date ON financial_snapshots(snapshot_date);
     CREATE TABLE IF NOT EXISTS insurance_attachments (
       id TEXT PRIMARY KEY,
       policy_id TEXT NOT NULL REFERENCES insurance_policies(id),
@@ -471,6 +482,7 @@ async function start() {
       },
       tags: [
         { name: "analysis", description: "AI 财务分析" },
+        { name: "financial-diagnosis", description: "家庭财务诊断计算" },
         { name: "dashboard", description: "首页支出看板" },
       ],
     },
@@ -492,6 +504,7 @@ async function start() {
   await app.register(liabilityRoutes, { prefix: "/api/v1/liabilities" });
   await app.register(insuranceRoutes, { prefix: "/api/v1/insurance" });
   await app.register(netWorthRoutes, { prefix: "/api/v1/networth" });
+  await app.register(financialDiagnosisRoutes, { prefix: "/api/v1/financial-diagnosis" });
   await app.register(categoryRoutes, { prefix: "/api/v1/categories" });
   await app.register(accountRoutes, { prefix: "/api/v1/accounts" });
   await app.register(memberRoutes, { prefix: "/api/v1/members" });
