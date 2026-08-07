@@ -27,11 +27,12 @@ const SECTIONS = [
   },
   {
     title: "AI 提示词",
-    description: "自定义 AI 解析和月度总结的提示词模板",
+    description: "自定义 AI 解析、月度总结和资产配置诊断的提示词模板",
     fields: [
       { key: "ai.parse_prompt", label: "消息解析提示词", type: "textarea", placeholder: "你是一个家庭财务助手..." },
       { key: "ai.monthly_summary_prompt", label: "月度总结提示词", type: "textarea", placeholder: "请根据以下数据生成月度财务分析..." },
       { key: "ai.financial_analysis_prompt", label: "前台 AI 分析提示词", type: "textarea", placeholder: "你是一个务实的家庭财务分析师..." },
+      { key: "ai.financial_diagnosis_prompt", label: "资产配置诊断提示词", type: "textarea", placeholder: "你是一名谨慎、务实的家庭财务规划助手..." },
     ],
   },
   {

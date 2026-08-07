@@ -1,24 +1,43 @@
 import { useEffect, useState } from "react";
 import { api } from "@/api/client";
-import type { Asset, AssetType, AllocationBucket, AssetValuation, Member } from "@caiwu/shared";
+import type {
+  Asset,
+  AssetLiquidity,
+  AssetPurpose,
+  AssetRebalanceMode,
+  AssetType,
+  AllocationBucket,
+  AssetValuation,
+  Member,
+} from "@caiwu/shared";
 import {
+  ASSET_LIQUIDITY_LABELS,
+  ASSET_PURPOSE_LABELS,
+  ASSET_REBALANCE_MODE_LABELS,
   ASSET_TYPE_LABELS,
+  ASSET_TYPE_DEFAULT_PROFILE,
   ALLOCATION_BUCKET_LABELS,
   ASSET_TYPE_TO_BUCKET,
 } from "@caiwu/shared";
-import { Plus, Trash2, Edit2, LineChart, Archive, RotateCcw } from "lucide-react";
+import { Plus, Trash2, Edit2, LineChart, Archive, RotateCcw, HelpCircle } from "lucide-react";
 import { formatCurrency } from "./helpers";
 import { getBusinessToday } from "@/lib/date";
 import { memberOptionLabel, selectableMembers } from "@/lib/member-options";
 
 const ASSET_TYPES = Object.keys(ASSET_TYPE_LABELS) as AssetType[];
 const BUCKETS = Object.keys(ALLOCATION_BUCKET_LABELS) as AllocationBucket[];
+const LIQUIDITIES = Object.keys(ASSET_LIQUIDITY_LABELS) as AssetLiquidity[];
+const REBALANCE_MODES = Object.keys(ASSET_REBALANCE_MODE_LABELS) as AssetRebalanceMode[];
+const PURPOSES = Object.keys(ASSET_PURPOSE_LABELS) as AssetPurpose[];
 
 const emptyForm = {
   type: "cash" as AssetType,
   name: "",
   amount: "",
   allocationBucket: "liquid" as AllocationBucket,
+  liquidity: "immediate" as AssetLiquidity,
+  rebalanceMode: "flexible" as AssetRebalanceMode,
+  purpose: "daily" as AssetPurpose,
   accountInfo: "",
   costBasis: "",
   memberId: "",
@@ -64,6 +83,9 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
       name: form.name.trim(),
       amount: Number(form.amount),
       allocationBucket: form.allocationBucket,
+      liquidity: form.liquidity,
+      rebalanceMode: form.rebalanceMode,
+      purpose: form.purpose,
       accountInfo: form.accountInfo || null,
       costBasis: form.costBasis === "" ? null : Number(form.costBasis),
       memberId: form.memberId || null,
@@ -94,6 +116,9 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
       name: a.name,
       amount: String(a.amount),
       allocationBucket: a.allocationBucket,
+      liquidity: a.liquidity,
+      rebalanceMode: a.rebalanceMode,
+      purpose: a.purpose,
       accountInfo: a.accountInfo || "",
       costBasis: a.costBasis == null ? "" : String(a.costBasis),
       memberId: a.memberId || "",
@@ -122,7 +147,7 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-muted-foreground">记录所有资产，新建资产会按大类自动归入配置象限，可手动调整</p>
+        <p className="text-sm text-muted-foreground">净资产包含所有资产；配置诊断会结合变现能力、调整方式和资金用途，避免把公积金或自用资产当作可直接调仓资金。</p>
         <div className="flex gap-2">
           {archivedCount > 0 && (
             <button onClick={() => setShowArchived((value) => !value)} className="rounded-md border px-3 py-2 text-sm">
@@ -144,12 +169,13 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
 
       <div className="overflow-hidden rounded-lg border bg-card">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-sm">
+          <table className="w-full min-w-[1120px] text-sm">
             <thead>
               <tr className="border-b bg-muted/50">
                 <th className="px-4 py-3 text-left">资产名称</th>
                 <th className="px-4 py-3 text-left">大类</th>
                 <th className="px-4 py-3 text-left">配置象限</th>
+                <th className="px-4 py-3 text-left">诊断属性</th>
                 <th className="px-4 py-3 text-left">账户信息</th>
                 <th className="px-4 py-3 text-right">当前市值</th>
                 <th className="px-4 py-3 text-right">成本</th>
@@ -160,13 +186,13 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-muted-foreground">
+                  <td colSpan={9} className="py-8 text-center text-muted-foreground">
                     加载中...
                   </td>
                 </tr>
               ) : visibleAssets.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-muted-foreground">
+                  <td colSpan={9} className="py-8 text-center text-muted-foreground">
                     暂无数据
                   </td>
                 </tr>
@@ -179,6 +205,12 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
                     </td>
                     <td className="px-4 py-2">{ASSET_TYPE_LABELS[a.type] || a.type}</td>
                     <td className="px-4 py-2">{ALLOCATION_BUCKET_LABELS[a.allocationBucket] || a.allocationBucket}</td>
+                    <td className="px-4 py-2">
+                      <div className="flex flex-col gap-0.5 text-xs">
+                        <span>{ASSET_LIQUIDITY_LABELS[a.liquidity]}</span>
+                        <span className="text-muted-foreground">{ASSET_REBALANCE_MODE_LABELS[a.rebalanceMode]} · {ASSET_PURPOSE_LABELS[a.purpose]}</span>
+                      </div>
+                    </td>
                     <td className="px-4 py-2 text-muted-foreground">{a.accountInfo || "-"}</td>
                     <td className="px-4 py-2 text-right font-medium">{formatCurrency(a.amount)}</td>
                     <td className="px-4 py-2 text-right text-muted-foreground">
@@ -218,7 +250,7 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
           onClick={closeForm}
         >
           <div
-            className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-lg bg-card p-5 sm:p-6"
+            className="max-h-[calc(100vh-2rem)] w-full max-w-xl overflow-y-auto rounded-lg bg-card p-5 sm:p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="mb-4 font-bold">{editingId ? "编辑资产" : "新增资产"}</h3>
@@ -239,7 +271,8 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
                     value={form.type}
                     onChange={(e) => {
                       const type = e.target.value as AssetType;
-                      setForm({ ...form, type, allocationBucket: ASSET_TYPE_TO_BUCKET[type] });
+                      const profile = ASSET_TYPE_DEFAULT_PROFILE[type];
+                      setForm({ ...form, type, allocationBucket: ASSET_TYPE_TO_BUCKET[type], ...profile });
                     }}
                     className="mt-1 w-full rounded border px-3 py-2 text-sm"
                   >
@@ -264,6 +297,30 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
                     ))}
                   </select>
                 </label>
+              </div>
+              <div className="rounded-md border bg-muted/30 p-3">
+                <p className="mb-3 text-sm font-medium">诊断属性</p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label className="text-xs text-muted-foreground">
+                    <span className="inline-flex items-center gap-1">变现能力<FieldHelp text="决定该资产能否计入现金安全月数。只有“可随时使用”的资金计入当前可用现金；短期可变现资产会单独展示。" /></span>
+                    <select value={form.liquidity} onChange={(e) => setForm({ ...form, liquidity: e.target.value as AssetLiquidity })} className="mt-1 w-full rounded border px-2 py-2 text-sm text-foreground">
+                      {LIQUIDITIES.map((value) => <option key={value} value={value}>{ASSET_LIQUIDITY_LABELS[value]}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-xs text-muted-foreground">
+                    <span className="inline-flex items-center gap-1">调整方式<FieldHelp text="“可直接调整”可通过买卖或转账调仓；“仅调整未来新增资金”适合公积金等存量受限、但可改变今后资金安排的资产；“不参与配置调仓”适合自用房、车辆等。" /></span>
+                    <select value={form.rebalanceMode} onChange={(e) => setForm({ ...form, rebalanceMode: e.target.value as AssetRebalanceMode })} className="mt-1 w-full rounded border px-2 py-2 text-sm text-foreground">
+                      {REBALANCE_MODES.map((value) => <option key={value} value={value}>{ASSET_REBALANCE_MODE_LABELS[value]}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-xs text-muted-foreground">
+                    <span className="inline-flex items-center gap-1">资金用途<FieldHelp text="用于区分日常周转、应急储备、养老、自用等目的，帮助 AI 避免只看比例给出机械的买卖建议。" /></span>
+                    <select value={form.purpose} onChange={(e) => setForm({ ...form, purpose: e.target.value as AssetPurpose })} className="mt-1 w-full rounded border px-2 py-2 text-sm text-foreground">
+                      {PURPOSES.map((value) => <option key={value} value={value}>{ASSET_PURPOSE_LABELS[value]}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">系统会按资产大类给出默认值，请根据真实情况复核；这些属性不会改变资产金额。</p>
               </div>
               <input
                 type="number"
@@ -334,6 +391,17 @@ export function AssetsTab({ onChanged }: { onChanged?: () => void }) {
         />
       )}
     </div>
+  );
+}
+
+function FieldHelp({ text }: { text: string }) {
+  return (
+    <span className="group relative inline-flex">
+      <HelpCircle className="h-3.5 w-3.5 cursor-help" />
+      <span role="tooltip" className="pointer-events-none invisible absolute left-0 top-full z-50 mt-1 w-64 rounded bg-slate-900 px-3 py-2 text-xs leading-5 text-white opacity-0 shadow-lg group-hover:visible group-hover:opacity-100">
+        {text}
+      </span>
+    </span>
   );
 }
 

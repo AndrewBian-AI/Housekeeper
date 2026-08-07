@@ -71,6 +71,9 @@ export const assets = sqliteTable("assets", {
   amount: real("amount").notNull(),
   currency: text("currency").notNull().default("CNY"),
   allocationBucket: text("allocation_bucket").notNull().default("stable"),
+  liquidity: text("liquidity").notNull().default("short_term"),
+  rebalanceMode: text("rebalance_mode").notNull().default("flexible"),
+  purpose: text("purpose").notNull().default("other"),
   accountInfo: text("account_info"),
   costBasis: real("cost_basis"),
   sortOrder: integer("sort_order").notNull().default(0),
@@ -112,6 +115,20 @@ export const financialSnapshots = sqliteTable(
     updatedAt: text("updated_at").notNull().default("(datetime('now'))"),
   },
   (table) => [uniqueIndex("idx_financial_snapshots_date").on(table.snapshotDate)]
+);
+
+export const financialDiagnosisAnalyses = sqliteTable(
+  "financial_diagnosis_analyses",
+  {
+    id: text("id").primaryKey(),
+    asOfDate: text("as_of_date").notNull(),
+    analysis: text("analysis").notNull(),
+    snapshot: text("snapshot").notNull(),
+    generatedAt: text("generated_at").notNull(),
+    createdAt: text("created_at").notNull().default("(datetime('now'))"),
+    updatedAt: text("updated_at").notNull().default("(datetime('now'))"),
+  },
+  (table) => [uniqueIndex("idx_financial_diagnosis_analyses_date").on(table.asOfDate)]
 );
 
 export const liabilities = sqliteTable("liabilities", {

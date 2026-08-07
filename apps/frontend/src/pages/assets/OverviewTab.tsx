@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/api/client";
 import type {
   AllocationStat,
+  AllocationOverview,
   AllocationBucket,
   AssetPreferences,
   CompositionItem,
@@ -26,6 +27,7 @@ export function OverviewTab({ refreshKey }: { refreshKey: number }) {
   const [overview, setOverview] = useState<NetWorthOverview | null>(null);
   const [composition, setComposition] = useState<NetWorthComposition | null>(null);
   const [allocation, setAllocation] = useState<AllocationStat[]>([]);
+  const [allocationOverview, setAllocationOverview] = useState<AllocationOverview | null>(null);
   const [investments, setInvestments] = useState<InvestmentPerformance | null>(null);
   const [trend, setTrend] = useState<NetWorthTrendPoint[]>([]);
   const [emergency, setEmergency] = useState<EmergencyFundStat | null>(null);
@@ -43,7 +45,7 @@ export function OverviewTab({ refreshKey }: { refreshKey: number }) {
         const [o, c, a, inv, t, e, p] = await Promise.all([
           api.get<NetWorthOverview>("/networth/overview"),
           api.get<NetWorthComposition>("/networth/composition"),
-          api.get<{ data: AllocationStat[] }>("/networth/allocation"),
+          api.get<AllocationOverview>("/networth/allocation"),
           api.get<InvestmentPerformance>("/networth/investments"),
           api.get<{ data: NetWorthTrendPoint[] }>("/networth/trend"),
           api.get<EmergencyFundStat>("/networth/emergency-fund"),
@@ -53,6 +55,7 @@ export function OverviewTab({ refreshKey }: { refreshKey: number }) {
         setOverview(o);
         setComposition(c);
         setAllocation(a.data);
+        setAllocationOverview(a);
         setInvestments(inv);
         setTrend(t.data);
         setEmergency(e);
@@ -170,7 +173,10 @@ export function OverviewTab({ refreshKey }: { refreshKey: number }) {
       {/* 配置 vs 目标 */}
       <div className="rounded-lg border bg-card p-4">
         <div className="mb-4 flex items-center justify-between gap-2">
-          <h3 className="font-medium">资产配置（当前 vs 目标）</h3>
+          <div>
+            <h3 className="font-medium">可配置金融资产（当前 vs 目标）</h3>
+            <p className="mt-1 text-xs text-muted-foreground">比例仅使用可直接调整及可通过未来新增资金调整的资产；自用/不参与调仓资产和保单现金价值不进入分母。</p>
+          </div>
           <button onClick={() => setShowPreferences(true)} className="rounded border px-3 py-1.5 text-sm">
             参数设置
           </button>
@@ -202,12 +208,19 @@ export function OverviewTab({ refreshKey }: { refreshKey: number }) {
             </div>
           ))}
           {allocation.length === 0 && <p className="text-sm text-muted-foreground">暂无资产数据</p>}
+          {allocationOverview && (
+            <div className="grid gap-2 border-t pt-3 text-xs text-muted-foreground sm:grid-cols-3">
+              <span>参与配置：{formatCurrency(allocationOverview.totalAssets)}</span>
+              <span>其中仅可调整未来资金：{formatCurrency(allocationOverview.futureCashFlowOnlyAssets)}</span>
+              <span>不参与调仓：{formatCurrency(allocationOverview.excludedAssets + allocationOverview.insuranceCashValueExcluded)}</span>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* 构成：象限 + 成员 */}
+      {/* 全量资产负债表构成：与上方可配置金融资产比例分开 */}
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-        <CompositionCard title="按配置象限" items={composition?.byBucket || []} />
+        <CompositionCard title="按资产大类（全量资产）" items={composition?.byType || []} />
         <CompositionCard title="按成员（净值）" items={composition?.byMember || []} />
       </div>
 

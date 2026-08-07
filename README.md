@@ -1,105 +1,250 @@
-# 家庭管理系统 · family-manager
+# Housekeeper · 家庭管理系统
 
-> 一个**自托管 / 数据私有化**的家庭管理系统：把家里的财务、资产、健康记录统一管起来，
-> 并打通微信，用一句话 + AI 自动录入。所有数据只存在你自己的服务器 / NAS 上。
+> 一套面向家庭长期使用的自托管管理系统。以记账为入口，逐步覆盖预算、资产负债、保险、家庭成员、健康档案和 AI 财务诊断，并支持通过微信完成日常录入。
 
 <p align="center">
-  <img alt="stack" src="https://img.shields.io/badge/React-19-61dafb">
-  <img alt="stack" src="https://img.shields.io/badge/Fastify-5-black">
-  <img alt="stack" src="https://img.shields.io/badge/SQLite-WAL-003b57">
-  <img alt="license" src="https://img.shields.io/badge/License-MIT-green">
+  <img alt="React 19" src="https://img.shields.io/badge/React-19-61dafb">
+  <img alt="Fastify 5" src="https://img.shields.io/badge/Fastify-5-black">
+  <img alt="SQLite WAL" src="https://img.shields.io/badge/SQLite-WAL-003b57">
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-ready-2496ed">
+  <img alt="License MIT" src="https://img.shields.io/badge/License-MIT-green">
 </p>
 
-## ✨ 特性
+## 项目亮点
 
-- **🏠 家庭全方位管理**，不止于记账：
-  - 记账收支、资产管理（工资 / 投资 / 保险等）
-  - 健康档案：体检报告按成员归档、自动解析结论与异常项；就诊记录（主诉 / 检查 / 诊断 / 医嘱 / 用药）
-  - 分类、账户、家庭成员统一管理
-- **💬 打通微信，AI 一句话录入**：在微信里发「午饭花了 35」「收到工资 15000」，
-  经 [OpenILink Hub](https://github.com/openilink/openilink-hub) 转发，AI 自动解析金额、类型、分类并入账。
-  支持图片小票 / 截图识别（OCR + 视觉模型）。
-- **🔒 数据私有化 / 自托管**：SQLite 单文件存储，跑在你自己的服务器或 NAS（飞牛 / 群晖 / 任意 Docker 主机）上，
-  数据不经过任何第三方云。
-- **🤖 月度 AI 分析**：每月自动聚合并生成家庭财务分析报告，可推送回微信。
-- **📱 响应式后台**：桌面 + 手机端都可用的管理界面。
+- **从记账走向家庭财务规划**：月度预算、年度预算、年度专项、资产负债、保险资料和实际收支形成一套相互参照的数据体系。
+- **确定性计算与 AI 建议分离**：净资产、储蓄率、现金安全月数、预算执行和资产偏离先由系统按固定规则计算，AI 只负责解释与建议，减少模型“猜数字”。
+- **适合真实家庭长期维护**：分类、成员、资产、负债和保单以归档代替直接删除，尽量保护历史数据关联；没有任何业务数据的空成员仍可安全删除。
+- **微信就是快捷记账入口**：支持自然语言、语音转写文本和小票/支付截图识别，并可查询最近记录和本月收支。
+- **自托管且边界清晰**：业务数据库保存在自己的 Mac、服务器或 NAS；公网微信入口可通过 Cloudflare Tunnel 只开放必要回调路径。
+- **支持外部模型协作**：资产配置诊断可一键复制结构化“财务现状描述”和当前 AI 建议，便于粘贴到其他模型继续深度讨论或线下存档。
 
-## 🧱 技术栈
+## 功能总览
+
+| 模块 | 已实现能力 |
+|---|---|
+| 首页 | 家庭收支、预算执行、资产负债和成员支出概览 |
+| AI 分析 | 月度财务分析；资产配置诊断；历史建议保存；Markdown 表格展示；复制现状与建议 |
+| 资产管理 | 资产、负债、保险、估值记录、投入成本、净资产趋势、资产配置目标和应急资金参数 |
+| 预算管理 | 月度预算、年度预算、年度预计收入、年度结余测算、年度专项和预算预警 |
+| 记账管理 | 收入/支出、分类、账户、成员、年度专项、来源和日期维护 |
+| 健康档案 | 体检报告上传与解析、异常项整理、就诊/检查/诊断/医嘱/用药记录 |
+| 基础资料 | 分类归档、账户管理、成员档案、微信绑定、成员合并与消息日志 |
+| 系统设置 | 文本模型、视觉模型、提示词、微信机器人和月度分析计划 |
+
+## 预算：区分日常开销与年度专项
+
+- 月度预算按当前支出分类动态生成，可从上月复制，并展示预算内、**预算外支出**和预警状态。
+- 年度预算可由某个月度预算快速生成，再做二次调整；支持年度预计收入、预计支出、预计结余和预计储蓄率测算。
+- 旅游、装修等非日常计划通过“年度专项”单独管理，可配置年份、预算和可选关键词。
+- 记账时可手动选择年度专项；微信解析到可能的专项时支持对话确认，避免直接误归类。
+- 年度专项支出不会占用月度日常预算，也不会被算作当月预算外支出，而是单列为“年度专项在本月发生的支出”。
+- 支出分类归档后不再用于新记账，但历史流水和历史预算关联继续保留。
+
+## 资产、负债与保险
+
+### 双层资产视图
+
+系统同时保留两种口径：
+
+1. **资产负债表口径**：全部生效资产 + 保单现金价值 - 负债，用于计算家庭净资产。
+2. **可配置金融资产口径**：只对适合调整的金融资产比较目标比例，避免把自住房、公积金等资产简单当作可以立即卖出调仓的资金。
+
+每项资产可维护：
+
+- 配置类别：活钱、稳健、进攻、保障；
+- 变现能力：随时可用、短期可变现、受限或难变现；
+- 调整方式：可直接调整、只调整未来新增资金、不参与调仓；
+- 资金用途：日常周转、短期计划、长期增值、养老、自用等；
+- 当前价值、投入成本和历史估值。
+
+资产配置目标与偏离阈值可在页面调整。资产金额采用定期盘点方式，不会因一笔记账流水自动增减。
+
+### 保险资料
+
+- 支持被保险人、投保人、险种、保额、保费、现金价值和有效期等基本信息。
+- 支持电子保单等可选附件，以及理赔方式、理赔电话、免赔额、等待期、续保条件、重要除外责任和保障摘要等字段。
+- 提供保险资料整理提示词，可将外部模型读取保单后的结果复制回系统。
+- 当前诊断只展示保障事实与资料完整度；缺少资料时会给出提示，不会直接推断“没有保障”或“保障不足”。
+- 资产、负债和保单支持归档与恢复，历史数据不会因退出日常使用而被破坏。
+
+## 资产配置诊断
+
+“AI 分析 → 资产配置诊断”综合以下数据：
+
+- 当前净资产及启用诊断后的真实快照变化；
+- 本年度实际记账收支和实际储蓄率；
+- 月度预算、年度预算与年度专项剩余资金需求；
+- 现金安全月数与应急资金缺口；
+- 可配置金融资产的当前比例、目标比例和偏离；
+- 家庭成员与保险资料准备度；
+- 当前负债、月供和有成本记录的投资收益。
+
+关键口径：
+
+- 实际储蓄率只使用记账管理中的实际收入与支出；资产市值更新、公积金余额变化和年度预计收入都不当作实际收入。
+- 净资产趋势只从功能启用后形成的真实快照开始，不倒推不存在的历史负债或资产变化。
+- 现金安全月数会考虑日常月度资金需求，并将年度专项剩余预算按本年剩余月份预留。
+- 公积金等“只能调整未来新增资金”的资产可进入结构观察，但 AI 不应建议直接卖出现有余额。
+- 缺少数据时输出资料提醒并降低结论强度，不自动补造数据。
+
+诊断页面的指标和分析区带有计算说明；生成 AI 建议前仍可独立查看全部确定性结果。复制功能只写入本机剪贴板，不会自动调用模型。
+
+## 家庭成员治理
+
+- 手动新增家庭成员，维护家庭关系、出生年份、收入角色和经济依赖等资料。
+- 微信首次记账可自动创建对应成员；也可以把微信身份绑定到已有成员。
+- 重复成员可合并，相关记账、资产、负债、保单、健康档案和微信绑定统一迁移到保留成员。
+- 有历史业务数据的成员使用归档；没有任何关联数据的测试/空成员可永久删除。
+- 归档成员不再承接新业务和微信记账，但历史数据仍然可查询。
+
+> 登录账号、家庭成员和微信身份是三套不同概念。成员中的“管理员/成员”用于家庭业务身份，不会改变系统登录密码。
+
+## 微信 AI 记账
+
+通过 [OpenILink Hub](https://github.com/openilink/openilink-hub) 接收微信消息：
+
+```text
+午饭花了35块
+发工资了15000
+补录 5月20日 午饭23元
+昨天买菜68元
+```
+
+支持能力：
+
+- 文字、语音转写文本和图片小票/支付截图记账；
+- AI 解析收入/支出、金额、日期、分类、备注和可能的年度专项；
+- `/help` 查看可配置的帮助信息；
+- `/recent` 查询包含后台手工录入在内的最近记录；
+- `/balance` 查询统一账本口径的本月收入、支出和结余；
+- 年度专项候选的二次确认；
+- 消息日志与失败原因排查。
+
+文字模型和视觉模型均通过 OpenAI 兼容接口配置。图片识别默认示例为阿里云百炼 `qwen3-vl-flash`，并不是业务逻辑上强制只能使用阿里云；替换服务商前需确认目标模型支持图片输入且接口格式兼容。
+
+## 数据边界与隐私
+
+- SQLite 数据库、上传附件和 OpenILink Hub 数据默认保存在自己的设备或 NAS。
+- 手工记账不会自动改变资产余额；资产价值来自定期盘点，避免交易流水和资产估值相互覆盖。
+- “账户管理”当前用于标记记账的支付/收款渠道，不等同于资产明细，也不会自动同步银行卡余额。
+- 使用云端文本或视觉模型时，完成解析或分析所需的消息、图片或汇总数据会发送给你配置的模型服务商，请根据隐私要求自行选择服务商。
+- 资产配置诊断不会把 API Key、电子保单附件或逐笔交易明细发送给文本分析模型，但会发送页面明确提示的汇总数据、资产诊断属性和保险保障事实。
+- Cloudflare Tunnel 只负责建立 HTTPS 通道；仓库提供的接入网关会限制微信公网入口，避免直接暴露账本后台。
+
+## 技术栈
 
 | 层 | 技术 |
-|----|------|
+|---|---|
 | 前端 | React 19 · React Router 7 · Vite · Tailwind CSS |
-| 后端 | Fastify 5 · Drizzle ORM · SQLite (better-sqlite3) |
-| AI | DeepSeek（文本解析 / 分析）· 阿里云百炼 DashScope（图片识别，可选） |
-| 微信网关 | [OpenILink Hub](https://github.com/openilink/openilink-hub) |
-| 部署 | Docker / docker-compose |
+| 后端 | Fastify 5 · Drizzle ORM · SQLite / better-sqlite3 |
+| AI | OpenAI 兼容接口；DeepSeek 文本模型；可选视觉模型 |
+| 微信网关 | OpenILink Hub · Nginx 接入网关 · 可选 Cloudflare Tunnel |
+| 部署 | Docker Compose |
 
-monorepo（pnpm）结构：`apps/backend`、`apps/frontend`、`packages/shared`。
+Monorepo（pnpm）结构：
 
-## 🚀 快速开始
-
-### 本地开发
-
-```bash
-pnpm install
-cp .env.example .env        # 按需填写，至少改掉 JWT_SECRET / ADMIN_PASSWORD
-pnpm dev                    # 前端 :5173（代理 API 到后端 :3000）
+```text
+apps/backend     Fastify API、数据库、AI 与微信处理
+apps/frontend    React 管理界面
+packages/shared  前后端共享类型和常量
+deploy           OpenILink Hub 与安全公网接入模板
 ```
+
+## 快速开始
 
 ### Docker 自托管部署
 
 ```bash
 cp .env.example .env
-# 生成强随机密钥与管理员密码
-#   JWT_SECRET=$(openssl rand -hex 32)
-#   ADMIN_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | head -c 16)
+# 修改 .env，至少设置 JWT_SECRET、ADMIN_USERNAME 和 ADMIN_PASSWORD
 docker compose up -d --build
+docker compose ps
 ```
 
-启动后访问 `http://<服务器IP>:3000`，用 `.env` 里的 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 登录。
-数据库持久化在挂载卷 `./data` 中，重建容器不丢数据。
+启动后访问 `http://<服务器IP>:3000`，使用 `.env` 中的管理员账号登录。数据库和上传文件保存在 `./data` 挂载目录，正常重建容器不会清空数据。
 
-> ⚠️ **备份提醒**：SQLite 启用了 WAL 模式，请务必把 `caiwu.db`、`caiwu.db-wal`、`caiwu.db-shm`
-> 三个文件**一起**备份，只复制主文件会丢失最新数据。
+### 本地开发
 
-## ⚙️ 配置
+环境要求：Node.js 20+、pnpm、Git。
+
+```bash
+pnpm install
+cp .env.example .env
+pnpm dev
+```
+
+前端开发服务默认使用 `5173` 端口，并代理后端 API；生产容器统一通过 `3000` 端口提供服务。
+
+## 配置说明
 
 运行时配置来自两处：
 
-1. **环境变量**（`.env`，见 [`.env.example`](.env.example)）——端口、数据库路径、JWT 密钥、管理员账号、AI 默认值、Hub 地址。
-2. **系统设置表**（SQLite，后台「系统设置」页面）——AI 配置、提示词、月报计划。设置项会覆盖对应的环境变量。
+1. `.env`：端口、数据库、登录账号和基础服务地址；
+2. 后台“系统设置”：文本模型、图片识别、提示词、微信机器人和分析计划。后台设置会覆盖对应的环境变量默认值。
 
-| 变量 | 说明 |
-|------|------|
-| `JWT_SECRET` | **务必改成随机字符串** |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 后台管理员账号，**务必修改默认值** |
-| `DEEPSEEK_API_KEY` | DeepSeek API Key，用于文本解析与 AI 分析 |
-| `DASHSCOPE_API_KEY` | （可选）阿里云百炼，用于图片小票识别 |
-| `HUB_URL` / `BASE_URL` | OpenILink Hub 地址与本服务回调地址 |
+| 配置 | 用途 |
+|---|---|
+| `JWT_SECRET` | 登录令牌签名密钥，必须改为随机字符串 |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 系统登录账号，必须修改默认值 |
+| `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL` | 默认文本模型配置 |
+| `DASHSCOPE_API_KEY` / `DASHSCOPE_BASE_URL` / `DASHSCOPE_VL_MODEL` | 默认图片识别配置，也可完全在后台维护 |
+| `HUB_URL` / `BASE_URL` | OpenILink Hub 地址与系统公网回调地址 |
 
-## 💬 接入微信录入（可选）
+不要把 `.env`、数据库、上传附件、Tunnel Token、OpenILink App Token 或 Webhook Secret 提交到 Git。
 
-1. 部署 [OpenILink Hub](https://github.com/openilink/openilink-hub)（本仓库 `deploy/openilink-hub/` 提供了一份 docker-compose 模板）。
-2. 在 Hub 创建机器人应用，拿到 App / Bot / Secret 信息。
-3. 若使用本仓库的同一套 Compose 配置，把 Webhook 回调设为
-   `http://integration-gateway:80/hub/webhook`；若 Hub 独立部署，则使用可访问的
-   `https://<你的域名>/hub/webhook`。
-4. 在后台「系统设置」填入 Hub 地址即可。
+## 接入微信与固定域名（可选）
 
-之后在微信里直接对机器人说话即可记账，内置 `/help`、`/recent`、`/balance` 命令。
+仓库在 [`deploy/openilink-hub`](deploy/openilink-hub/) 提供了独立部署模板，包括：
 
-## 🙏 致谢
+- OpenILink Hub；
+- 只放行必要回调路径的 Nginx integration-gateway；
+- 使用固定域名且无需路由器端口映射的 Cloudflare Tunnel。
 
-- **[OpenILink Hub](https://github.com/openilink/openilink-hub)** —— 本项目的微信消息录入能力依赖它作为消息网关，
-  在此特别致谢。
-- [DeepSeek](https://platform.deepseek.com) 提供语义解析与分析能力。
-- 阿里云百炼 DashScope 提供图片识别能力。
+完整步骤见 [`deploy/openilink-hub/README.md`](deploy/openilink-hub/README.md)。
 
-## 📄 许可证
+公网接入建议使用独立子域名，例如 `https://wechat.example.com`。接入网关仅允许：
+
+- `/manifest.json`
+- `/oauth/setup`
+- `/oauth/redirect`
+- `/hub/webhook`
+
+不要把整个后台 `:3000` 端口直接暴露到公网。
+
+## 数据备份
+
+SQLite 启用了 WAL 模式。**不要在系统运行时只复制 `caiwu.db` 主文件**，否则最近写入 WAL 的数据可能不在备份中。
+
+最容易核验的本地备份方式是先停止主服务，再复制整个数据目录：
+
+```bash
+docker compose stop caiwu
+cp -a data "data-backup-$(date +%Y%m%d-%H%M%S)"
+docker compose start caiwu
+```
+
+备份完成后应确认副本中包含数据库和附件，并定期在隔离环境测试恢复。NAS 部署时建议再将备份同步到另一块磁盘或其他设备；RAID 不能代替备份。
+
+## 安全建议
+
+- 首次启动前修改默认管理员密码和 `JWT_SECRET`。
+- AI Key、OpenILink 凭证和 Cloudflare Tunnel Token 仅保存在本地 `.env` 或系统设置中。
+- 对外只开放 HTTPS 和必要路径，不开放 SQLite 文件、附件目录或 OpenILink 管理后台。
+- 家庭财务与保险数据敏感；把复制出的现状描述发送给外部模型前，请先确认服务商的数据政策。
+- 升级前先做可恢复备份，升级后检查登录、记账、预算、资产估值和微信消息链路。
+
+## 致谢
+
+- [OpenILink Hub](https://github.com/openilink/openilink-hub) 提供微信消息接入能力。
+- [DeepSeek](https://platform.deepseek.com) 提供默认文本模型能力。
+- 阿里云百炼 DashScope 提供默认图片识别示例。
+- 本项目基于 [jackcheng321321/family-manager](https://github.com/jackcheng321321/family-manager) 持续演进。
+
+## 许可证
 
 [MIT](LICENSE)
 
 ---
 
-> 本仓库为开源版本，**不包含任何真实家庭数据、密钥或私有部署信息**。
-> 请自行准备 `.env` 与数据库，所有敏感数据保存在你自己的部署环境中。
+> 本仓库不包含真实家庭数据、密钥或私有部署凭证。请自行准备 `.env` 和数据库，并在启用外部 AI 服务前确认自己的隐私边界。

@@ -6,6 +6,7 @@ import { settings } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { authGuard } from "../middleware/auth.js";
 import { DEFAULT_WECHAT_HELP_MESSAGE } from "../hub/help-message.js";
+import { DEFAULT_FINANCIAL_DIAGNOSIS_PROMPT } from "../ai/prompts.js";
 
 export async function settingRoutes(app: FastifyInstance) {
   app.addHook("preHandler", authGuard);
@@ -16,6 +17,7 @@ export async function settingRoutes(app: FastifyInstance) {
       "hub.url": config.hubUrl,
       "hub.base_url": config.baseUrl,
       "wechat.help_message": DEFAULT_WECHAT_HELP_MESSAGE,
+      "ai.financial_diagnosis_prompt": DEFAULT_FINANCIAL_DIAGNOSIS_PROMPT,
     };
     for (const s of all) {
       result[s.key] = s.value;

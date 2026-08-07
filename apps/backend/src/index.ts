@@ -109,6 +109,9 @@ function initDatabase() {
       amount REAL NOT NULL,
       currency TEXT NOT NULL DEFAULT 'CNY',
       allocation_bucket TEXT NOT NULL DEFAULT 'stable',
+      liquidity TEXT NOT NULL DEFAULT 'short_term',
+      rebalance_mode TEXT NOT NULL DEFAULT 'flexible',
+      purpose TEXT NOT NULL DEFAULT 'other',
       account_info TEXT,
       cost_basis REAL,
       sort_order INTEGER NOT NULL DEFAULT 0,
@@ -308,12 +311,54 @@ function migrateAssetsTable() {
   const existing = new Set(columns.map((c) => c.name));
   const additions: Array<[string, string]> = [
     ["allocation_bucket", "ALTER TABLE assets ADD COLUMN allocation_bucket TEXT NOT NULL DEFAULT 'stable'"],
+    ["liquidity", "ALTER TABLE assets ADD COLUMN liquidity TEXT NOT NULL DEFAULT 'short_term'"],
+    ["rebalance_mode", "ALTER TABLE assets ADD COLUMN rebalance_mode TEXT NOT NULL DEFAULT 'flexible'"],
+    ["purpose", "ALTER TABLE assets ADD COLUMN purpose TEXT NOT NULL DEFAULT 'other'"],
     ["account_info", "ALTER TABLE assets ADD COLUMN account_info TEXT"],
     ["cost_basis", "ALTER TABLE assets ADD COLUMN cost_basis REAL"],
     ["sort_order", "ALTER TABLE assets ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"],
   ];
   for (const [name, ddl] of additions) {
     if (!existing.has(name)) sqlite.exec(ddl);
+  }
+
+  // 只在本次首次增加诊断属性时，根据资产大类给历史资产设置保守默认值。
+  // 不改金额、名称或配置象限；用户可在资产明细中逐项复核。
+  if (!existing.has("liquidity")) {
+    sqlite.exec(`UPDATE assets SET liquidity = CASE type
+      WHEN 'cash' THEN 'immediate'
+      WHEN 'fixed_income' THEN 'short_term'
+      WHEN 'equity' THEN 'short_term'
+      WHEN 'investment' THEN 'short_term'
+      WHEN 'real_estate' THEN 'illiquid'
+      WHEN 'physical' THEN 'illiquid'
+      WHEN 'pension' THEN 'restricted'
+      ELSE 'restricted'
+    END`);
+  }
+  if (!existing.has("rebalance_mode")) {
+    sqlite.exec(`UPDATE assets SET rebalance_mode = CASE type
+      WHEN 'cash' THEN 'flexible'
+      WHEN 'fixed_income' THEN 'flexible'
+      WHEN 'equity' THEN 'flexible'
+      WHEN 'investment' THEN 'flexible'
+      WHEN 'pension' THEN 'future_cash_flow'
+      WHEN 'insurance' THEN 'future_cash_flow'
+      ELSE 'excluded'
+    END`);
+  }
+  if (!existing.has("purpose")) {
+    sqlite.exec(`UPDATE assets SET purpose = CASE type
+      WHEN 'cash' THEN 'daily'
+      WHEN 'fixed_income' THEN 'near_term'
+      WHEN 'equity' THEN 'long_term_growth'
+      WHEN 'investment' THEN 'long_term_growth'
+      WHEN 'real_estate' THEN 'self_use'
+      WHEN 'physical' THEN 'self_use'
+      WHEN 'pension' THEN 'retirement'
+      WHEN 'insurance' THEN 'retirement'
+      ELSE 'other'
+    END`);
   }
 
   // 映射旧的资产大类取值（数据为测试数据，可直接修改），并回填配置象限默认值。
@@ -327,11 +372,17 @@ function migrateAssetsTable() {
       WHEN 'equity' THEN 'growth'
       WHEN 'real_estate' THEN 'stable'
       WHEN 'physical' THEN 'stable'
-      WHEN 'pension' THEN 'protection'
+      WHEN 'pension' THEN 'stable'
       WHEN 'receivable' THEN 'stable'
       ELSE 'stable'
     END
     WHERE allocation_bucket IS NULL OR allocation_bucket = '';
+    UPDATE assets SET liquidity = 'restricted'
+      WHERE liquidity IS NULL OR liquidity NOT IN ('immediate', 'short_term', 'restricted', 'illiquid');
+    UPDATE assets SET rebalance_mode = 'excluded'
+      WHERE rebalance_mode IS NULL OR rebalance_mode NOT IN ('flexible', 'future_cash_flow', 'excluded');
+    UPDATE assets SET purpose = 'other'
+      WHERE purpose IS NULL OR purpose NOT IN ('daily', 'emergency', 'near_term', 'retirement', 'long_term_growth', 'self_use', 'other');
   `);
 }
 
@@ -378,6 +429,16 @@ function migratePlanningTables() {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_financial_snapshots_date ON financial_snapshots(snapshot_date);
+    CREATE TABLE IF NOT EXISTS financial_diagnosis_analyses (
+      id TEXT PRIMARY KEY,
+      as_of_date TEXT NOT NULL UNIQUE,
+      analysis TEXT NOT NULL,
+      snapshot TEXT NOT NULL,
+      generated_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_financial_diagnosis_analyses_date ON financial_diagnosis_analyses(as_of_date);
     CREATE TABLE IF NOT EXISTS insurance_attachments (
       id TEXT PRIMARY KEY,
       policy_id TEXT NOT NULL REFERENCES insurance_policies(id),

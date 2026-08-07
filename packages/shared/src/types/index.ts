@@ -7,11 +7,23 @@ export type AssetType =
   | "equity" // 权益投资/进攻
   | "real_estate" // 房产
   | "physical" // 实物资产（车、贵金属等）
-  | "pension" // 养老金/公积金等保障类
+  | "pension" // 养老金/公积金等受限长期储备
   | "receivable" // 应收款（借出去的钱）
   | "other";
 // 标普四象限配置桶
 export type AllocationBucket = "liquid" | "stable" | "growth" | "protection";
+/** 资产在需要用钱时的实际变现能力。 */
+export type AssetLiquidity = "immediate" | "short_term" | "restricted" | "illiquid";
+/** 资产存量是否能直接调仓；future_cash_flow 表示只能调整今后的新增资金。 */
+export type AssetRebalanceMode = "flexible" | "future_cash_flow" | "excluded";
+export type AssetPurpose =
+  | "daily"
+  | "emergency"
+  | "near_term"
+  | "retirement"
+  | "long_term_growth"
+  | "self_use"
+  | "other";
 export type LiabilityType = "mortgage" | "car_loan" | "credit_card" | "consumer_loan" | "other";
 export type InsuranceCategory =
   | "social" // 社保
@@ -119,6 +131,12 @@ export interface Asset {
   currency: string;
   /** 配置象限：活钱/稳健/进攻/保障 */
   allocationBucket: AllocationBucket;
+  /** 变现能力，用于现金安全判断。 */
+  liquidity: AssetLiquidity;
+  /** 调整方式，用于判断是否纳入目标配置及如何给出调整建议。 */
+  rebalanceMode: AssetRebalanceMode;
+  /** 主要资金用途，用于解释资产性质。 */
+  purpose: AssetPurpose;
   /** 具体账户信息，如「程伟光-招行」 */
   accountInfo: string | null;
   /** 投入成本（投资类用于算累计收益，可空） */
@@ -446,6 +464,16 @@ export interface AllocationStat {
   gapAmount: number;
 }
 
+export interface AllocationOverview {
+  data: AllocationStat[];
+  /** 参与目标比例比较的金融资产。 */
+  totalAssets: number;
+  totalBalanceSheetAssets: number;
+  futureCashFlowOnlyAssets: number;
+  excludedAssets: number;
+  insuranceCashValueExcluded: number;
+}
+
 export interface InvestmentPerformanceItem {
   id: string;
   name: string;
@@ -544,15 +572,38 @@ export interface AllocationDiagnosisItem {
 }
 
 export interface AllocationDiagnosis {
+  /** 参与目标比例比较的金融资产金额（保留 totalAssets 字段兼容现有页面）。 */
   totalAssets: number;
+  /** 家庭资产负债表中的全部资产，包含受限/自用资产及保单现金价值。 */
+  totalBalanceSheetAssets: number;
+  freelyRebalanceableAssets: number;
+  futureCashFlowOnlyAssets: number;
+  excludedAssets: number;
+  excludedAssetCount: number;
+  insuranceCashValueExcluded: number;
   deviationThresholdPoints: number;
   maxAbsoluteDeviationPoints: number | null;
   status: "on_target" | "deviated" | "unknown";
   items: AllocationDiagnosisItem[];
+  assets: AssetDiagnosisItem[];
+}
+
+export interface AssetDiagnosisItem {
+  id: string;
+  name: string;
+  type: AssetType;
+  amount: number;
+  allocationBucket: AllocationBucket;
+  liquidity: AssetLiquidity;
+  rebalanceMode: AssetRebalanceMode;
+  purpose: AssetPurpose;
+  includedInAllocation: boolean;
 }
 
 export interface LiquidityDiagnosis {
+  /** 可随时动用的资产；不再仅凭“四象限=活钱”判断。 */
   liquidAssets: number;
+  shortTermLiquidAssets: number;
   regularMonthlyRequirement: number;
   specialProjectMonthlyReserve: number;
   plannedMonthlyRequirement: number;
@@ -630,6 +681,13 @@ export interface FinancialDiagnosisReport {
   annualBudget: AnnualBudgetExecution;
   warnings: FinancialDiagnosisWarning[];
   methodologyNotes: string[];
+}
+
+export interface FinancialDiagnosisAIResponse {
+  asOfDate: string;
+  generatedAt: string;
+  analysis: string;
+  snapshot: FinancialDiagnosisReport;
 }
 
 export interface FinancialAnalysisRequest {

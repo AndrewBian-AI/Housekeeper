@@ -1,16 +1,27 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "@/api/client";
+import { Markdown } from "@/components/Markdown";
+import { formatFinancialDiagnosisSnapshot } from "@/lib/financial-diagnosis-copy";
 import type {
+  FinancialDiagnosisAIResponse,
   FinancialDiagnosisReport,
   InsuranceCategory,
   LiquidityDiagnosis,
 } from "@caiwu/shared";
-import { INSURANCE_CATEGORY_LABELS } from "@caiwu/shared";
+import {
+  ASSET_LIQUIDITY_LABELS,
+  ASSET_PURPOSE_LABELS,
+  ASSET_REBALANCE_MODE_LABELS,
+  INSURANCE_CATEGORY_LABELS,
+} from "@caiwu/shared";
 import {
   AlertCircle,
+  Brain,
   CheckCircle2,
+  ClipboardCopy,
   Database,
   HelpCircle,
+  Loader2,
   RefreshCw,
   ShieldCheck,
   WalletCards,
@@ -39,23 +50,38 @@ const HELP = {
   netWorthChange: "从首次启用本功能时建立的真实快照开始比较。当天重复进入只更新当天快照，不会倒推启用前的历史变化。",
   savingsRate: "本年实际储蓄率＝（记账收入－记账支出）÷记账收入。只使用记账管理中的实际流水，不把资产市值、公积金余额更新或年度预计收入当作实际收入。",
   liquidity: "现金安全月数＝现金及活钱÷月度资金需求。月度资金需求包含日常需求和年度专项剩余预算的月度预留。日常需求依次取本月预算、年度日常预算月均值或历史日常支出月均值。",
-  allocationDeviation: "分别计算现金及活钱、稳健保值、长期增值和保障资产的当前比例与目标比例之差，再展示绝对值最大的偏离。目标比例来自资产管理中的参数设置。",
+  allocationDeviation: "只在可配置金融资产中，分别计算活钱、稳健、进攻和保障的当前比例与目标比例之差。自用/不参与调仓资产和保单现金价值不进入分母；只能调整未来新增资金的资产仍用于观察结构，但不会被建议直接卖出。",
   insuranceStatus: "检查生效家庭成员是否关联保单，以及成员资料、保障摘要、保额、免赔额、续保条件等关键资料是否齐备。这里只判断资料完整度，不判断保障是否充足。",
   debtRatio: "资产负债率＝当前生效负债余额÷当前总资产。没有负债时显示为 0%，不会推断已经偿还的历史负债。",
   investmentReturn: "投资收益率＝（当前市值－投入成本）÷投入成本。只统计归入长期增值、且已维护投入成本的资产；缺少成本的数据不会被猜测。",
-  allocationPanel: "按每项资产维护的配置类别汇总。当前比例＝该类资产金额÷总资产；偏离＝当前比例－目标比例。保险现金价值计入保障资产。",
+  allocationPanel: "这是双层资产视图中的“可配置金融资产”层。净资产仍包含所有资产，但本表只对可直接调整或可通过未来新增资金调整的金融资产计算目标偏离。自用车辆、房产等不参与调仓资产，以及保单现金价值，会单独列出而不挤占四象限比例。",
   liquidityPanel: "展示现金安全月数的每个组成部分。年度专项只按尚未使用的预算，在本年度剩余月份中平均预留，避免遗漏旅游等非每月发生的大额计划。",
   savingsPanel: "展示本年度截至今天的实际记账收支。年度预计收入仅用于计划进度、保费负担和偿债负担参考，不参与实际储蓄率。",
   insurancePanel: "按生效家庭成员展示已关联险种、已记录保额和待补资料。资料缺失只会形成提醒，不会被解释为没有保障或保障不足。",
   budgetPanel: "同时展示月度日常预算、预算外支出和年度专项执行。年度专项支出不占用月度日常预算，也不计入月度预算外支出。",
   investmentDebtPanel: "投资部分使用已维护的投入成本和当前市值；负债部分使用生效负债余额和月供。预计收入仅作为偿债负担率的计划参考分母。",
   warningsPanel: "集中列出会影响指标完整性或可靠性的资料缺口。缺少数据时系统降低结论强度，而不是阻止分析或自动补造数据。",
+  aiAdvicePanel: "点击生成后，大模型只解释本页已经计算完成的数据，并提供参考策略和行动建议。AI 不会修改指标、预算或资产配置参数；汇总指标、成员姓名和保险保障事实会发送给你配置的模型服务商，每次生成会消耗相应 API 用量。",
 } as const;
 
 export function FinancialDiagnosisPanel() {
   const [report, setReport] = useState<FinancialDiagnosisReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [aiResult, setAiResult] = useState<FinancialDiagnosisAIResponse | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [copyMessage, setCopyMessage] = useState("");
+
+  const copyText = async (content: string, successMessage: string) => {
+    setCopyMessage("");
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopyMessage(successMessage);
+    } catch {
+      setCopyMessage("浏览器未允许自动复制，请检查浏览器的剪贴板权限后重试。");
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -71,7 +97,31 @@ export function FinancialDiagnosisPanel() {
     }
   };
 
-  useEffect(() => { void load(); }, []);
+  const loadLatestAI = async () => {
+    try {
+      setAiResult(await api.get<FinancialDiagnosisAIResponse>("/financial-diagnosis/ai/latest"));
+    } catch {
+      // 尚未生成过 AI 建议时保持空状态，不影响确定性诊断数据。
+    }
+  };
+
+  const generateAI = async () => {
+    setAiLoading(true);
+    setAiError("");
+    try {
+      setAiResult(await api.post<FinancialDiagnosisAIResponse>("/financial-diagnosis/ai", {}));
+      await load();
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : "资产配置 AI 建议生成失败");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+    void loadLatestAI();
+  }, []);
 
   if (loading && !report) {
     return <div className="flex items-center justify-center gap-2 rounded-lg border bg-card p-10 text-sm text-muted-foreground"><RefreshCw className="h-4 w-4 animate-spin" />正在计算家庭财务指标</div>;
@@ -106,28 +156,80 @@ export function FinancialDiagnosisPanel() {
       />
       <Metric label="本年实际储蓄率" help={HELP.savingsRate} value={rate(report.savings.savingsRate)} note={`记账收入 ${currency(report.savings.actualIncome)} · 结余 ${signedCurrency(report.savings.netSavings)}`} tone={report.savings.savingsRate === null ? "default" : report.savings.savingsRate >= 0 ? "success" : "danger"} />
       <Metric label="现金安全月数" help={HELP.liquidity} value={report.liquidity.coverageMonths === null ? "无法计算" : `${report.liquidity.coverageMonths.toFixed(2)} 个月`} note={`${LIQUIDITY_STATUS[report.liquidity.status]} · 目标 ${report.liquidity.targetMonths} 个月`} tone={report.liquidity.status === "sufficient" ? "success" : report.liquidity.status === "insufficient" ? "danger" : "default"} />
-      <Metric label="资产配置最大偏离" help={HELP.allocationDeviation} value={report.allocation.maxAbsoluteDeviationPoints === null ? "无法计算" : `${report.allocation.maxAbsoluteDeviationPoints.toFixed(2)} 个百分点`} note={`提醒阈值 ${report.allocation.deviationThresholdPoints} 个百分点`} tone={report.allocation.status === "deviated" ? "danger" : report.allocation.status === "on_target" ? "success" : "default"} />
+      <Metric label="可配置资产最大偏离" help={HELP.allocationDeviation} value={report.allocation.maxAbsoluteDeviationPoints === null ? "无法计算" : `${report.allocation.maxAbsoluteDeviationPoints.toFixed(2)} 个百分点`} note={`参与配置 ${currency(report.allocation.totalAssets)} · 阈值 ${report.allocation.deviationThresholdPoints} 个百分点`} tone={report.allocation.status === "deviated" ? "danger" : report.allocation.status === "on_target" ? "success" : "default"} />
       <Metric label="保险资料状态" help={HELP.insuranceStatus} value={report.insurance.dataStatus === "ready" ? "资料齐备" : report.insurance.dataStatus === "partial" ? "部分待补" : "资料不足"} note={`${report.insurance.membersWithPolicyCount}/${report.insurance.activeMemberCount} 名成员已关联保单`} tone={report.insurance.dataStatus === "ready" ? "success" : "default"} />
       <Metric label="资产负债率" help={HELP.debtRatio} value={rate(report.debt.debtToAssetRatio)} note={`月供 ${currency(report.debt.monthlyPayment)}`} />
       <Metric label="投资收益记录" help={HELP.investmentReturn} value={rate(report.investment.returnRate)} note={`${report.investment.trackedAssetCount} 项可计算 · ${report.investment.missingCostBasisCount} 项缺成本`} />
     </div>
 
     <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-      <div className="flex items-start gap-2"><Database className="mt-0.5 h-4 w-4 flex-none" /><div><p className="font-medium">本页只展示事实和计算口径</p><p className="mt-1 text-xs text-blue-800">年度预计收入不会计入实际储蓄；资产、公积金和投资市值更新只影响净资产。第四批才会把这些数据交给大模型生成解释和建议。</p></div></div>
+      <div className="flex items-start gap-2"><Database className="mt-0.5 h-4 w-4 flex-none" /><div><p className="font-medium">确定性指标与 AI 建议相互独立</p><p className="mt-1 text-xs text-blue-800">年度预计收入不会计入实际储蓄；资产、公积金和投资市值更新只影响净资产。下方 AI 综合建议只解释本页数据，不会修改计算结果或系统参数。</p></div></div>
     </div>
 
+    <Panel title="AI 综合建议" help={HELP.aiAdvicePanel} icon={<Brain className="h-5 w-5" />}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm text-muted-foreground">综合净资产、实际储蓄、预算、现金安全、资产结构、保险、负债和投资记录生成长期财务建议。</p>
+          <p className="mt-1 text-xs text-amber-700">生成时会发送本页汇总数据、各项资产的名称/金额/诊断属性、成员姓名和保险保障事实；不会发送电子保单附件、API Key或逐笔交易明细。</p>
+          <p className="mt-1 text-xs text-muted-foreground">复制功能只会将整理后的 Markdown 写入本机剪贴板，不会自动调用或发送给任何大模型。</p>
+          {aiResult && <p className="mt-1 text-xs text-muted-foreground">数据截至 {aiResult.asOfDate} · 生成于 {new Date(aiResult.generatedAt).toLocaleString("zh-CN")}</p>}
+        </div>
+        <div className="flex flex-none flex-wrap gap-2">
+          <button type="button" onClick={() => void copyText(formatFinancialDiagnosisSnapshot(report), "现状描述已复制，可直接粘贴给外部大模型。")} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border px-4 text-sm hover:bg-muted">
+            <ClipboardCopy className="h-4 w-4" />复制现状描述
+          </button>
+          <button type="button" onClick={() => void generateAI()} disabled={aiLoading} className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm text-primary-foreground disabled:opacity-50">
+            {aiLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
+            {aiLoading ? "正在生成" : aiResult ? "重新生成建议" : "生成 AI 建议"}
+          </button>
+        </div>
+      </div>
+      {copyMessage && <p className={`mt-3 rounded-md px-3 py-2 text-xs ${copyMessage.includes("已复制") ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>{copyMessage}</p>}
+      {aiError && <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{aiError}</div>}
+      {aiResult ? (
+        <div className="mt-4 border-t pt-4">
+          <div className="mb-3 flex justify-end">
+            <button type="button" onClick={() => void copyText(`# 资产配置诊断 AI 建议\n\n- 数据截至：${aiResult.asOfDate}\n- 生成时间：${new Date(aiResult.generatedAt).toLocaleString("zh-CN")}\n\n${aiResult.analysis}`, "当前建议已复制，Markdown 标题和表格会被保留。")} className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs hover:bg-muted">
+              <ClipboardCopy className="h-3.5 w-3.5" />复制当前建议
+            </button>
+          </div>
+          <Markdown content={aiResult.analysis} />
+        </div>
+      ) : (
+        <div className="mt-4 rounded-md border border-dashed p-5 text-center text-sm text-muted-foreground">尚未生成 AI 建议。只有点击上方按钮后才会调用你在系统设置中配置的大模型。</div>
+      )}
+    </Panel>
+
     <div className="grid gap-4 xl:grid-cols-2">
-      <Panel title="资产结构与目标比例" help={HELP.allocationPanel} icon={<WalletCards className="h-5 w-5" />}>
+      <Panel title="可配置金融资产与目标比例" help={HELP.allocationPanel} icon={<WalletCards className="h-5 w-5" />}>
+        <div className="mb-3 grid gap-2 rounded-md bg-muted/40 p-3 text-xs sm:grid-cols-2">
+          <span>资产负债表总资产：{currency(report.allocation.totalBalanceSheetAssets)}</span>
+          <span>参与配置分析：{currency(report.allocation.totalAssets)}</span>
+          <span>可直接调整：{currency(report.allocation.freelyRebalanceableAssets)}</span>
+          <span>仅调整未来资金：{currency(report.allocation.futureCashFlowOnlyAssets)}</span>
+          <span>不参与调仓：{currency(report.allocation.excludedAssets)}</span>
+          <span>另排除保单现金价值：{currency(report.allocation.insuranceCashValueExcluded)}</span>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[620px] text-sm">
             <thead><tr className="border-b text-left text-xs text-muted-foreground"><th className="py-2">配置类别</th><th className="py-2 text-right">当前金额</th><th className="py-2 text-right">当前</th><th className="py-2 text-right">目标</th><th className="py-2 text-right">偏离</th><th className="py-2 text-right">状态</th></tr></thead>
             <tbody>{report.allocation.items.map((item) => <tr key={item.bucket} className="border-b last:border-0"><td className="py-2 font-medium">{item.label}</td><td className="py-2 text-right">{currency(item.amount)}</td><td className="py-2 text-right">{item.currentRatio}%</td><td className="py-2 text-right">{item.targetRatio}%</td><td className={`py-2 text-right ${Math.abs(item.deviationPoints) > report.allocation.deviationThresholdPoints ? "text-red-600" : ""}`}>{item.deviationPoints >= 0 ? "+" : ""}{item.deviationPoints}%</td><td className="py-2 text-right">{item.status === "over" ? "超配" : item.status === "under" ? "低配" : "范围内"}</td></tr>)}</tbody>
           </table>
         </div>
+        <details className="mt-3 rounded-md border p-3 text-sm">
+          <summary className="cursor-pointer font-medium">查看各项资产的诊断属性</summary>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[760px] text-xs">
+              <thead><tr className="border-b text-left text-muted-foreground"><th className="py-2">资产</th><th className="py-2 text-right">金额</th><th className="py-2">变现能力</th><th className="py-2">调整方式</th><th className="py-2">用途</th><th className="py-2">配置分析</th></tr></thead>
+              <tbody>{report.allocation.assets.map((asset) => <tr key={asset.id} className="border-b last:border-0"><td className="py-2 font-medium">{asset.name}</td><td className="py-2 text-right">{currency(asset.amount)}</td><td className="py-2">{ASSET_LIQUIDITY_LABELS[asset.liquidity]}</td><td className="py-2">{ASSET_REBALANCE_MODE_LABELS[asset.rebalanceMode]}</td><td className="py-2">{ASSET_PURPOSE_LABELS[asset.purpose]}</td><td className="py-2">{asset.includedInAllocation ? "纳入" : "排除"}</td></tr>)}</tbody>
+            </table>
+          </div>
+        </details>
       </Panel>
 
       <Panel title="现金安全月数构成" help={HELP.liquidityPanel} icon={<WalletCards className="h-5 w-5" />}>
         <Fact label="现金及活钱" value={currency(report.liquidity.liquidAssets)} />
+        <Fact label="短期可变现资产" value={currency(report.liquidity.shortTermLiquidAssets)} note="单独展示，未直接计入现金安全月数" />
         <Fact label="日常月度资金需求" value={currency(report.liquidity.regularMonthlyRequirement)} note={REGULAR_BASIS[report.liquidity.regularBasis]} />
         <Fact label="年度专项月度预留" value={currency(report.liquidity.specialProjectMonthlyReserve)} note={`剩余专项预算 ${currency(report.liquidity.remainingSpecialBudget)} ÷ ${report.liquidity.remainingMonths} 个月`} />
         <Fact label="合计月度资金需求" value={currency(report.liquidity.plannedMonthlyRequirement)} />

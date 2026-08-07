@@ -5,8 +5,12 @@ import { eq, and, sql, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { authGuard } from "../middleware/auth.js";
 import { getBusinessToday } from "../utils/date.js";
+import { ASSET_TYPE_DEFAULT_PROFILE } from "@caiwu/shared";
 import {
   ALLOCATION_BUCKETS,
+  ASSET_LIQUIDITIES,
+  ASSET_PURPOSES,
+  ASSET_REBALANCE_MODES,
   ASSET_TYPES,
   firstError,
   validateDate,
@@ -22,6 +26,9 @@ interface AssetBody {
   amount: number;
   currency?: string;
   allocationBucket?: string;
+  liquidity?: string;
+  rebalanceMode?: string;
+  purpose?: string;
   accountInfo?: string;
   costBasis?: number;
   sortOrder?: number;
@@ -34,6 +41,9 @@ function validateAssetBody(body: Record<string, unknown>, allowArchivedMemberId?
     validateRequiredName(body.name, "资产名称"),
     validateEnum(body.type, ASSET_TYPES, "资产类型"),
     validateEnum(body.allocationBucket, ALLOCATION_BUCKETS, "配置类别"),
+    validateEnum(body.liquidity, ASSET_LIQUIDITIES, "变现能力"),
+    validateEnum(body.rebalanceMode, ASSET_REBALANCE_MODES, "调整方式"),
+    validateEnum(body.purpose, ASSET_PURPOSES, "资金用途"),
     validateNonNegative(body.amount, "当前价值", true),
     validateNonNegative(body.costBasis, "成本金额"),
     validateMember(body.memberId, "所属成员", allowArchivedMemberId)
@@ -120,10 +130,14 @@ export async function assetRoutes(app: FastifyInstance) {
 
   app.post<{ Body: AssetBody }>("/", async (request, reply) => {
     const body = request.body;
+    const profile = ASSET_TYPE_DEFAULT_PROFILE[body.type as keyof typeof ASSET_TYPE_DEFAULT_PROFILE];
     const normalized = {
       ...body,
       name: body.name?.trim(),
       allocationBucket: body.allocationBucket ?? "stable",
+      liquidity: body.liquidity ?? profile?.liquidity ?? "restricted",
+      rebalanceMode: body.rebalanceMode ?? profile?.rebalanceMode ?? "excluded",
+      purpose: body.purpose ?? profile?.purpose ?? "other",
     };
     const error = validateAssetBody(normalized);
     if (error) return reply.status(400).send({ error });
@@ -138,6 +152,9 @@ export async function assetRoutes(app: FastifyInstance) {
         amount: body.amount,
         currency: body.currency ?? "CNY",
         allocationBucket: normalized.allocationBucket,
+        liquidity: normalized.liquidity,
+        rebalanceMode: normalized.rebalanceMode,
+        purpose: normalized.purpose,
         accountInfo: body.accountInfo ?? null,
         costBasis: body.costBasis ?? null,
         sortOrder: body.sortOrder ?? 0,
@@ -170,6 +187,9 @@ export async function assetRoutes(app: FastifyInstance) {
       "amount",
       "currency",
       "allocationBucket",
+      "liquidity",
+      "rebalanceMode",
+      "purpose",
       "accountInfo",
       "costBasis",
       "sortOrder",

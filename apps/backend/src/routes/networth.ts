@@ -1,6 +1,7 @@
 import type {
   AllocationBucket,
   AllocationStat,
+  AllocationOverview,
   AssetPreferences,
   AssetType,
   CompositionItem,
@@ -213,8 +214,9 @@ export async function netWorthRoutes(app: FastifyInstance) {
     return { byType, byBucket, byMember };
   });
 
-  app.get("/allocation", async (): Promise<{ data: AllocationStat[]; totalAssets: number }> => {
-    const assetList = getActiveAssets();
+  app.get("/allocation", async (): Promise<AllocationOverview> => {
+    const allAssetList = getActiveAssets();
+    const assetList = allAssetList.filter((asset) => asset.rebalanceMode !== "excluded");
     const insuranceCashValue = getInsuranceCashValue();
     const target = getTargetAllocation();
 
@@ -223,8 +225,6 @@ export async function netWorthRoutes(app: FastifyInstance) {
       const bucket = (a.allocationBucket as AllocationBucket) || "stable";
       bucketAmount.set(bucket, (bucketAmount.get(bucket) ?? 0) + (a.amount || 0));
     }
-    bucketAmount.set("protection", (bucketAmount.get("protection") ?? 0) + insuranceCashValue);
-
     const totalAssets = Array.from(bucketAmount.values()).reduce((s, v) => s + v, 0);
 
     const data: AllocationStat[] = BUCKETS.map((bucket) => {
@@ -242,7 +242,22 @@ export async function netWorthRoutes(app: FastifyInstance) {
       };
     });
 
-    return { data, totalAssets: roundMoney(totalAssets) };
+    return {
+      data,
+      totalAssets: roundMoney(totalAssets),
+      totalBalanceSheetAssets: roundMoney(allAssetList.reduce((sum, asset) => sum + (asset.amount || 0), 0) + insuranceCashValue),
+      futureCashFlowOnlyAssets: roundMoney(
+        allAssetList
+          .filter((asset) => asset.rebalanceMode === "future_cash_flow")
+          .reduce((sum, asset) => sum + (asset.amount || 0), 0)
+      ),
+      excludedAssets: roundMoney(
+        allAssetList
+          .filter((asset) => asset.rebalanceMode === "excluded")
+          .reduce((sum, asset) => sum + (asset.amount || 0), 0)
+      ),
+      insuranceCashValueExcluded: roundMoney(insuranceCashValue),
+    };
   });
 
   app.get("/investments", async (): Promise<InvestmentPerformance> => {

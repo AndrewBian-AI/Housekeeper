@@ -1,6 +1,10 @@
 import type {
   AllocationBucket,
   AllocationDiagnosis,
+  AssetLiquidity,
+  AssetPurpose,
+  AssetRebalanceMode,
+  AssetType,
   DebtDiagnosis,
   FinancialDiagnosisReport,
   FinancialDiagnosisWarning,
@@ -194,15 +198,16 @@ function savingsDiagnosis(year: number, today: string, expectedAnnualIncome: num
 
 function allocationDiagnosis(balance: ReturnType<typeof currentBalanceSheet>): AllocationDiagnosis {
   const target = targetAllocation();
+  const portfolioAssets = balance.activeAssets.filter((asset) => asset.rebalanceMode !== "excluded");
   const amountByBucket = new Map<AllocationBucket, number>();
-  for (const asset of balance.activeAssets) {
+  for (const asset of portfolioAssets) {
     const bucket = BUCKETS.includes(asset.allocationBucket as AllocationBucket)
       ? (asset.allocationBucket as AllocationBucket)
       : "stable";
     amountByBucket.set(bucket, (amountByBucket.get(bucket) || 0) + Number(asset.amount || 0));
   }
-  amountByBucket.set("protection", (amountByBucket.get("protection") || 0) + balance.insuranceCashValue);
-  const totalAssets = balance.totalAssets;
+  // 保单现金价值属于受限保障储备，保留在净资产中，但不参与四象限目标调仓。
+  const totalAssets = money(portfolioAssets.reduce((sum, asset) => sum + Number(asset.amount || 0), 0));
   const items = BUCKETS.map((bucket) => {
     const amount = money(amountByBucket.get(bucket) || 0);
     const currentRatio = totalAssets > 0 ? percent(amount / totalAssets) : 0;
@@ -229,6 +234,24 @@ function allocationDiagnosis(balance: ReturnType<typeof currentBalanceSheet>): A
     : null;
   return {
     totalAssets,
+    totalBalanceSheetAssets: balance.totalAssets,
+    freelyRebalanceableAssets: money(
+      balance.activeAssets
+        .filter((asset) => asset.rebalanceMode === "flexible")
+        .reduce((sum, asset) => sum + Number(asset.amount || 0), 0)
+    ),
+    futureCashFlowOnlyAssets: money(
+      balance.activeAssets
+        .filter((asset) => asset.rebalanceMode === "future_cash_flow")
+        .reduce((sum, asset) => sum + Number(asset.amount || 0), 0)
+    ),
+    excludedAssets: money(
+      balance.activeAssets
+        .filter((asset) => asset.rebalanceMode === "excluded")
+        .reduce((sum, asset) => sum + Number(asset.amount || 0), 0)
+    ),
+    excludedAssetCount: balance.activeAssets.filter((asset) => asset.rebalanceMode === "excluded").length,
+    insuranceCashValueExcluded: balance.insuranceCashValue,
     deviationThresholdPoints: DEVIATION_THRESHOLD_POINTS,
     maxAbsoluteDeviationPoints: maxDeviation,
     status:
@@ -238,6 +261,19 @@ function allocationDiagnosis(balance: ReturnType<typeof currentBalanceSheet>): A
           ? "deviated"
           : "on_target",
     items,
+    assets: balance.activeAssets.map((asset) => ({
+      id: asset.id,
+      name: asset.name,
+      type: asset.type as AssetType,
+      amount: money(Number(asset.amount || 0)),
+      allocationBucket: (BUCKETS.includes(asset.allocationBucket as AllocationBucket)
+        ? asset.allocationBucket
+        : "stable") as AllocationBucket,
+      liquidity: asset.liquidity as AssetLiquidity,
+      rebalanceMode: asset.rebalanceMode as AssetRebalanceMode,
+      purpose: asset.purpose as AssetPurpose,
+      includedInAllocation: asset.rebalanceMode !== "excluded",
+    })),
   };
 }
 
@@ -301,7 +337,12 @@ function liquidityDiagnosis(
 ): LiquidityDiagnosis {
   const liquidAssets = money(
     balance.activeAssets
-      .filter((asset) => asset.allocationBucket === "liquid")
+      .filter((asset) => asset.liquidity === "immediate")
+      .reduce((sum, asset) => sum + Number(asset.amount || 0), 0)
+  );
+  const shortTermLiquidAssets = money(
+    balance.activeAssets
+      .filter((asset) => asset.liquidity === "short_term")
       .reduce((sum, asset) => sum + Number(asset.amount || 0), 0)
   );
   const actual = actualRegularExpenseAverage(today);
@@ -343,6 +384,7 @@ function liquidityDiagnosis(
   }
   return {
     liquidAssets,
+    shortTermLiquidAssets,
     regularMonthlyRequirement: money(regularMonthlyRequirement),
     specialProjectMonthlyReserve,
     plannedMonthlyRequirement,
@@ -468,7 +510,9 @@ function debtDiagnosis(
 }
 
 function investmentDiagnosis(balance: ReturnType<typeof currentBalanceSheet>): InvestmentDiagnosis {
-  const growthAssets = balance.activeAssets.filter((asset) => asset.allocationBucket === "growth");
+  const growthAssets = balance.activeAssets.filter(
+    (asset) => asset.allocationBucket === "growth" && asset.rebalanceMode !== "excluded"
+  );
   const tracked = growthAssets.filter((asset) => asset.costBasis !== null && asset.costBasis > 0);
   const totalCost = money(tracked.reduce((sum, asset) => sum + Number(asset.costBasis || 0), 0));
   const currentValue = money(tracked.reduce((sum, asset) => sum + Number(asset.amount || 0), 0));
@@ -526,6 +570,20 @@ export function buildFinancialDiagnosis(): FinancialDiagnosisReport {
   if (investment.missingCostBasisCount > 0) {
     warnings.push({ code: "MISSING_COST_BASIS", level: "info", message: `有 ${investment.missingCostBasisCount} 项进攻类资产未填写投入成本，无法计算完整投资收益。` });
   }
+  if (allocation.excludedAssetCount > 0 || allocation.insuranceCashValueExcluded > 0) {
+    warnings.push({
+      code: "NON_REBALANCEABLE_ASSETS_EXCLUDED",
+      level: "info",
+      message: `配置偏离已排除 ${allocation.excludedAssetCount} 项不参与调仓的资产${allocation.insuranceCashValueExcluded > 0 ? "及保单现金价值" : ""}，但它们仍计入净资产。`,
+    });
+  }
+  if (allocation.futureCashFlowOnlyAssets > 0) {
+    warnings.push({
+      code: "FUTURE_CASH_FLOW_ONLY_ASSETS",
+      level: "info",
+      message: `有 ${money(allocation.futureCashFlowOnlyAssets).toFixed(2)} 元资产只能通过未来新增资金逐步调整，不能把目标差额解释为需要卖出存量。`,
+    });
+  }
 
   return {
     generatedAt: new Date().toISOString(),
@@ -547,6 +605,9 @@ export function buildFinancialDiagnosis(): FinancialDiagnosisReport {
       "年度预计收入只用于年度预算测算、保费负担和偿债负担的参考分母，不替代实际收入。",
       "净资产变化从本功能启用后记录的真实快照开始计算，不根据当前余额倒推历史。",
       "现金安全月数优先使用当前月度预算，其次使用年度日常预算，最后使用历史日常支出；年度专项按剩余预算在年内剩余月份分摊。",
+      "净资产包含全部生效资产和保单现金价值；资产配置目标只比较可直接调整或可通过未来新增资金调整的金融资产。",
+      "公积金等受限资产可纳入结构观察，但只能建议调整未来资金流；自用房、车辆和保单现金价值不参与目标调仓比例。",
+      "现金安全月数只把标记为“可随时使用”的资产作为当前可用现金，短期可变现资产单独展示但不直接计入。",
       "保险部分只检查成员覆盖事实和资料完整度；资料缺失不会被解释为没有保障或保障不足。",
     ],
   };
